@@ -260,8 +260,11 @@ std::vector<uint8_t> MemoryHandler::DecodeData(const std::string& data, const st
     if (encoding == "hex") {
         return StringUtils::HexToBytes(data);
     } else if (encoding == "base64") {
-        // Base64 瑙ｇ爜锛堥渶瑕佸疄鐜帮級
-        throw InvalidParamsException("Base64 encoding not yet implemented");
+        try {
+            return StringUtils::FromBase64(data);
+        } catch (const std::exception&) {
+            throw InvalidParamsException("Invalid base64 data");
+        }
     } else if (encoding == "ascii") {
         return std::vector<uint8_t>(data.begin(), data.end());
     } else {
@@ -273,8 +276,7 @@ std::string MemoryHandler::EncodeData(const std::vector<uint8_t>& data, const st
     if (encoding == "hex") {
         return StringUtils::BytesToHex(data);
     } else if (encoding == "base64") {
-        // Base64 缂栫爜锛堥渶瑕佸疄鐜帮級
-        throw InvalidParamsException("Base64 encoding not yet implemented");
+        return StringUtils::ToBase64(data);
     } else if (encoding == "ascii") {
         return std::string(data.begin(), data.end());
     } else {

@@ -10,7 +10,7 @@ namespace MCP {
  */
 struct ThreadInfo {
     uint32_t id;                // 线程ID
-    uint32_t handle;            // 线程句柄
+    uint64_t handle;            // 线程句柄
     uint64_t entry;             // 入口点地址
     uint64_t teb;               // 线程环境块（TEB）地址
     std::string name;           // 线程名称（如果有）

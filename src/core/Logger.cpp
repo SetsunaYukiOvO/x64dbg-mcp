@@ -60,11 +60,11 @@ LogLevel Logger::GetLevel() {
 }
 
 void Logger::Log(LogLevel level, const std::string& message) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     if (!m_initialized || level < m_level) {
         return;
     }
-    
-    std::lock_guard<std::mutex> lock(m_mutex);
     
     std::string timestamp = GetTimestamp();
     std::string levelStr = LevelToString(level);

@@ -114,6 +114,11 @@ private:
     
     template<typename T, typename... Args>
     static std::string FormatLogMessage(const std::string& format, T&& value, Args&&... args);
+
+    template<typename T>
+    static void AppendFormattedValue(std::ostringstream& oss, T&& value);
+    static void AppendFormattedValue(std::ostringstream& oss, const char* value);
+    static void AppendFormattedValue(std::ostringstream& oss, char* value);
     
     static std::ofstream m_file;
     static LogLevel m_level;
@@ -125,10 +130,6 @@ private:
 // 模板函数实现
 template<typename... Args>
 void Logger::LogFormatted(LogLevel level, const std::string& format, Args&&... args) {
-    if (!m_initialized || level < m_level) {
-        return;
-    }
-    
     std::string message = FormatLogMessage(format, std::forward<Args>(args)...);
     Log(level, message);
 }
@@ -140,7 +141,7 @@ std::string Logger::FormatLogMessage(const std::string& format, T&& value, Args&
     
     if (pos != std::string::npos) {
         oss << format.substr(0, pos);
-        oss << std::forward<T>(value);
+        AppendFormattedValue(oss, std::forward<T>(value));
         std::string remaining = format.substr(pos + 2);
         oss << FormatLogMessage(remaining, std::forward<Args>(args)...);
     } else {
@@ -148,6 +149,19 @@ std::string Logger::FormatLogMessage(const std::string& format, T&& value, Args&
     }
     
     return oss.str();
+}
+
+template<typename T>
+void Logger::AppendFormattedValue(std::ostringstream& oss, T&& value) {
+    oss << std::forward<T>(value);
+}
+
+inline void Logger::AppendFormattedValue(std::ostringstream& oss, const char* value) {
+    oss << (value ? value : "(null)");
+}
+
+inline void Logger::AppendFormattedValue(std::ostringstream& oss, char* value) {
+    oss << (value ? value : "(null)");
 }
 
 } // namespace MCP

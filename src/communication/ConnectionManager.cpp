@@ -103,10 +103,10 @@ void ConnectionManager::BroadcastMessage(const std::string& message) {
     }
 }
 
-void ConnectionManager::ProcessClientReceive(ClientId clientId) {
+bool ConnectionManager::ProcessClientReceive(ClientId clientId) {
     auto client = GetClient(clientId);
     if (!client || !client->connected) {
-        return;
+        return false;
     }
     
     uint8_t buffer[4096];
@@ -117,7 +117,7 @@ void ConnectionManager::ProcessClientReceive(ClientId clientId) {
             Logger::Debug("Recv error for client {}: {}", clientId, WSAGetLastError());
         }
         RemoveClient(clientId);
-        return;
+        return false;
     }
     
     // 添加到接收缓冲区
@@ -154,6 +154,7 @@ void ConnectionManager::ProcessClientReceive(ClientId clientId) {
             }
         }
     }
+    return GetClient(clientId) != nullptr;
 }
 
 size_t ConnectionManager::GetClientCount() const {

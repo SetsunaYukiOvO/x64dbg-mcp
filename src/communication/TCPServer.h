@@ -4,6 +4,8 @@
 #include <thread>
 #include <atomic>
 #include <functional>
+#include <vector>
+#include <mutex>
 
 namespace MCP {
 
@@ -67,6 +69,7 @@ private:
     
     std::thread m_acceptThread;
     std::vector<std::thread> m_clientThreads;
+    std::mutex m_clientThreadsMutex;
     
     ConnectionManager m_connectionManager;
     

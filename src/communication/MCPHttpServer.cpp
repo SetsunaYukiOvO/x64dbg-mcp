@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <limits>
 #include <nlohmann/json.hpp>
 
@@ -111,6 +112,10 @@ bool ReceiveHttpRequest(SOCKET socket, std::string& request, bool& payloadTooLar
                 const std::string headerPart = request.substr(0, headerEnd + 4);
                 if (!ParseContentLength(headerPart, contentLength)) {
                     contentLength = 0;
+                }
+                if (contentLength > kMaxHttpRequestSize) {
+                    payloadTooLarge = true;
+                    return false;
                 }
                 lengthKnown = true;
             }
@@ -256,6 +261,7 @@ bool MCPHttpServer::Start(const std::string& host, int port) {
     if (bind(m_listenSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
         Logger::Error("Failed to bind socket: {}", WSAGetLastError());
         closesocket(m_listenSocket);
+        m_listenSocket = INVALID_SOCKET;
         WSACleanup();
         return false;
     }
@@ -264,6 +270,7 @@ bool MCPHttpServer::Start(const std::string& host, int port) {
     if (listen(m_listenSocket, SOMAXCONN) == SOCKET_ERROR) {
         Logger::Error("Failed to listen: {}", WSAGetLastError());
         closesocket(m_listenSocket);
+        m_listenSocket = INVALID_SOCKET;
         WSACleanup();
         return false;
     }
@@ -276,17 +283,61 @@ bool MCPHttpServer::Start(const std::string& host, int port) {
 }
 
 void MCPHttpServer::Stop() {
-    if (!m_running) return;
+    bool hasTasks = false;
+    {
+        std::lock_guard<std::mutex> lock(m_clientTasksMutex);
+        hasTasks = !m_clientTasks.empty();
+    }
+    bool hasActiveClients = false;
+    {
+        std::lock_guard<std::mutex> lock(m_activeClientSocketsMutex);
+        hasActiveClients = !m_activeClientSockets.empty();
+    }
+    if (!m_running && m_listenSocket == INVALID_SOCKET && !m_serverThread.joinable() &&
+        !hasTasks && !hasActiveClients) {
+        return;
+    }
 
     m_running = false;
 
     if (m_listenSocket != INVALID_SOCKET) {
+        shutdown(m_listenSocket, SD_BOTH);
         closesocket(m_listenSocket);
         m_listenSocket = INVALID_SOCKET;
     }
 
+    {
+        std::lock_guard<std::mutex> lock(m_activeClientSocketsMutex);
+        for (SOCKET clientSocket : m_activeClientSockets) {
+            shutdown(clientSocket, SD_BOTH);
+        }
+    }
+
     if (m_serverThread.joinable()) {
         m_serverThread.join();
+    }
+
+    std::vector<std::future<void>> clientTasks;
+    {
+        std::lock_guard<std::mutex> lock(m_clientTasksMutex);
+        clientTasks.swap(m_clientTasks);
+    }
+    for (auto& task : clientTasks) {
+        if (!task.valid()) {
+            continue;
+        }
+        try {
+            task.get();
+        } catch (const std::exception& ex) {
+            Logger::Error("Client task ended with exception: {}", ex.what());
+        } catch (...) {
+            Logger::Error("Client task ended with unknown exception");
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_activeClientSocketsMutex);
+        m_activeClientSockets.clear();
     }
 
     WSACleanup();
@@ -295,18 +346,66 @@ void MCPHttpServer::Stop() {
 
 void MCPHttpServer::ServerLoop() {
     while (m_running) {
+        CleanupFinishedClientTasks();
+
         SOCKET clientSocket = accept(m_listenSocket, nullptr, nullptr);
         if (clientSocket == INVALID_SOCKET) {
             if (m_running) {
                 Logger::Error("Accept failed");
+                m_running = false;
             }
             break;
         }
 
-        // 涓烘瘡涓鎴风鍒涘缓鏂扮嚎绋嬶紙绠€鍖栫増锛屽疄闄呭簲璇ョ敤绾跨▼姹狅級
-        std::thread([this, clientSocket]() {
-            HandleClient(clientSocket);
-        }).detach();
+        {
+            std::lock_guard<std::mutex> lock(m_activeClientSocketsMutex);
+            m_activeClientSockets.insert(clientSocket);
+        }
+
+        auto task = std::async(std::launch::async, [this, clientSocket]() {
+            try {
+                HandleClient(clientSocket);
+            } catch (const std::exception& ex) {
+                Logger::Error("Unhandled exception in client handler: {}", ex.what());
+                closesocket(clientSocket);
+            } catch (...) {
+                Logger::Error("Unhandled non-standard exception in client handler");
+                closesocket(clientSocket);
+            }
+
+            std::lock_guard<std::mutex> lock(m_activeClientSocketsMutex);
+            m_activeClientSockets.erase(clientSocket);
+        });
+
+        {
+            std::lock_guard<std::mutex> lock(m_clientTasksMutex);
+            m_clientTasks.emplace_back(std::move(task));
+        }
+    }
+}
+
+void MCPHttpServer::CleanupFinishedClientTasks() {
+    std::lock_guard<std::mutex> lock(m_clientTasksMutex);
+    auto it = m_clientTasks.begin();
+    while (it != m_clientTasks.end()) {
+        if (!it->valid()) {
+            it = m_clientTasks.erase(it);
+            continue;
+        }
+
+        if (it->wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            try {
+                it->get();
+            } catch (const std::exception& ex) {
+                Logger::Error("Client task ended with exception: {}", ex.what());
+            } catch (...) {
+                Logger::Error("Client task ended with unknown exception");
+            }
+            it = m_clientTasks.erase(it);
+            continue;
+        }
+
+        ++it;
     }
 }
 
@@ -407,9 +506,12 @@ void MCPHttpServer::HandleSSE(SOCKET clientSocket) {
                 
                 // 瑙ｆ瀽骞跺鐞?JSON-RPC 璇锋眰
                 std::string method, requestId;
-                if (ParseJsonRpcRequest(line, method, requestId)) {
+                bool hasRequestId = false;
+                if (ParseJsonRpcRequest(line, method, requestId, hasRequestId)) {
                     std::string response = HandleMCPMethod(method, requestId, line);
-                    SendSSEEvent(clientSocket, "message", response);
+                    if (hasRequestId && !response.empty()) {
+                        SendSSEEvent(clientSocket, "message", response);
+                    }
                 }
             }
         } else if (bytesReceived == 0) {
@@ -442,11 +544,20 @@ void MCPHttpServer::HandleSSE(SOCKET clientSocket) {
 
 void MCPHttpServer::HandlePostMessage(SOCKET clientSocket, const std::string& body) {
     Logger::Debug("POST body received: " + body);
-    
-    std::string method, requestId;
-    if (!ParseJsonRpcRequest(body, method, requestId)) {
-        Logger::Error("Failed to parse JSON-RPC request");
+
+    try {
+        [[maybe_unused]] const auto parsed = json::parse(body);
+    } catch (const json::exception&) {
+        Logger::Error("Failed to parse JSON body");
         SendHttpResponse(clientSocket, 400, "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Parse error\"}}");
+        return;
+    }
+
+    std::string method, requestId;
+    bool hasRequestId = false;
+    if (!ParseJsonRpcRequest(body, method, requestId, hasRequestId)) {
+        Logger::Error("Invalid JSON-RPC request");
+        SendHttpResponse(clientSocket, 400, "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Invalid Request\"}}");
         return;
     }
 
@@ -455,7 +566,10 @@ void MCPHttpServer::HandlePostMessage(SOCKET clientSocket, const std::string& bo
     std::string response = HandleMCPMethod(method, requestId, body);
     
     // 濡傛灉鏄€氱煡锛堟病鏈夊搷搴旓級锛岃繑鍥?204 No Content
-    if (response.empty()) {
+    if (!hasRequestId) {
+        Logger::Debug("No response needed (notification)");
+        SendHttpResponse(clientSocket, 204, "");
+    } else if (response.empty()) {
         Logger::Debug("No response needed (notification)");
         SendHttpResponse(clientSocket, 204, "");
     } else {
@@ -464,15 +578,25 @@ void MCPHttpServer::HandlePostMessage(SOCKET clientSocket, const std::string& bo
     }
 }
 
-bool MCPHttpServer::ParseJsonRpcRequest(const std::string& rawJson, 
-                                        std::string& method, 
-                                        std::string& requestId) {
+bool MCPHttpServer::ParseJsonRpcRequest(const std::string& rawJson,
+                                        std::string& method,
+                                        std::string& requestId,
+                                        bool& hasRequestId) {
     method.clear();
     requestId = "null";
+    hasRequestId = false;
 
     try {
         json request = json::parse(rawJson);
         if (!request.is_object()) {
+            return false;
+        }
+
+        auto versionIt = request.find("jsonrpc");
+        if (versionIt == request.end()) {
+            return false;
+        }
+        if (!versionIt->is_string() || versionIt->get<std::string>() != "2.0") {
             return false;
         }
 
@@ -484,12 +608,13 @@ bool MCPHttpServer::ParseJsonRpcRequest(const std::string& rawJson,
 
         auto idIt = request.find("id");
         if (idIt != request.end()) {
+            hasRequestId = true;
             if (idIt->is_null()) {
                 requestId = "null";
             } else if (idIt->is_string() || idIt->is_number()) {
                 requestId = idIt->dump();
             } else {
-                Logger::Warning("Unsupported JSON-RPC id type, fallback to null");
+                return false;
             }
         }
 
@@ -533,7 +658,7 @@ std::string MCPHttpServer::HandleMCPMethod(const std::string& method, const std:
             // 瑙ｆ瀽璇锋眰 body
             json requestJson = json::parse(body);
             
-            if (!requestJson.contains("params")) {
+            if (!requestJson.contains("params") || !requestJson["params"].is_object()) {
                 return json({
                     {"jsonrpc", "2.0"},
                     {"id", requestId == "null" ? nullptr : json::parse(requestId)},
@@ -558,6 +683,16 @@ std::string MCPHttpServer::HandleMCPMethod(const std::string& method, const std:
             }
             
             std::string toolName = params["name"].get<std::string>();
+            if (params.contains("arguments") && !params["arguments"].is_object()) {
+                return json({
+                    {"jsonrpc", "2.0"},
+                    {"id", requestId == "null" ? nullptr : json::parse(requestId)},
+                    {"error", {
+                        {"code", -32602},
+                        {"message", "Invalid params: arguments must be an object"}
+                    }}
+                }).dump();
+            }
             json arguments = params.value("arguments", json::object());
             
             Logger::Info("Calling tool: {} with args: {}", toolName, arguments.dump());
@@ -579,13 +714,13 @@ std::string MCPHttpServer::HandleMCPMethod(const std::string& method, const std:
             }).dump();
             
         } catch (const json::exception& e) {
-            Logger::Error("JSON parse error in tools/call: {}", e.what());
+            Logger::Error("Invalid params in tools/call: {}", e.what());
             return json({
                 {"jsonrpc", "2.0"},
                 {"id", requestId == "null" ? nullptr : json::parse(requestId)},
                 {"error", {
-                    {"code", -32700},
-                    {"message", std::string("Parse error: ") + e.what()}
+                    {"code", -32602},
+                    {"message", std::string("Invalid params: ") + e.what()}
                 }}
             }).dump();
         } catch (const std::exception& e) {
@@ -636,18 +771,30 @@ std::string MCPHttpServer::HandleMCPMethod(const std::string& method, const std:
         try {
             json requestJson = json::parse(body);
             
-            if (!requestJson.contains("params") || !requestJson["params"].contains("uri")) {
+            if (!requestJson.contains("params") || !requestJson["params"].is_object()) {
                 return json({
                     {"jsonrpc", "2.0"},
                     {"id", requestId == "null" ? nullptr : json::parse(requestId)},
                     {"error", {
                         {"code", -32602},
-                        {"message", "Invalid params: missing uri"}
+                        {"message", "Invalid params: missing params object"}
+                    }}
+                }).dump();
+            }
+
+            const json& params = requestJson["params"];
+            if (!params.contains("uri") || !params["uri"].is_string()) {
+                return json({
+                    {"jsonrpc", "2.0"},
+                    {"id", requestId == "null" ? nullptr : json::parse(requestId)},
+                    {"error", {
+                        {"code", -32602},
+                        {"message", "Invalid params: missing or invalid uri"}
                     }}
                 }).dump();
             }
             
-            std::string uri = requestJson["params"]["uri"].get<std::string>();
+            std::string uri = params["uri"].get<std::string>();
             Logger::Info("Reading resource: {}", uri);
             
             auto& registry = MCPResourceRegistry::Instance();
@@ -663,6 +810,16 @@ std::string MCPHttpServer::HandleMCPMethod(const std::string& method, const std:
             
             return response.dump();
             
+        } catch (const json::exception& e) {
+            Logger::Error("Invalid params in resources/read: {}", e.what());
+            return json({
+                {"jsonrpc", "2.0"},
+                {"id", requestId == "null" ? nullptr : json::parse(requestId)},
+                {"error", {
+                    {"code", -32602},
+                    {"message", std::string("Invalid params: ") + e.what()}
+                }}
+            }).dump();
         } catch (const std::exception& e) {
             Logger::Error("Exception in resources/read: {}", e.what());
             return json({
@@ -696,19 +853,42 @@ std::string MCPHttpServer::HandleMCPMethod(const std::string& method, const std:
         try {
             json requestJson = json::parse(body);
             
-            if (!requestJson.contains("params") || !requestJson["params"].contains("name")) {
+            if (!requestJson.contains("params") || !requestJson["params"].is_object()) {
                 return json({
                     {"jsonrpc", "2.0"},
                     {"id", requestId == "null" ? nullptr : json::parse(requestId)},
                     {"error", {
                         {"code", -32602},
-                        {"message", "Invalid params: missing name"}
+                        {"message", "Invalid params: missing params object"}
+                    }}
+                }).dump();
+            }
+
+            const json& params = requestJson["params"];
+            if (!params.contains("name") || !params["name"].is_string()) {
+                return json({
+                    {"jsonrpc", "2.0"},
+                    {"id", requestId == "null" ? nullptr : json::parse(requestId)},
+                    {"error", {
+                        {"code", -32602},
+                        {"message", "Invalid params: missing or invalid name"}
+                    }}
+                }).dump();
+            }
+
+            if (params.contains("arguments") && !params["arguments"].is_object()) {
+                return json({
+                    {"jsonrpc", "2.0"},
+                    {"id", requestId == "null" ? nullptr : json::parse(requestId)},
+                    {"error", {
+                        {"code", -32602},
+                        {"message", "Invalid params: arguments must be an object"}
                     }}
                 }).dump();
             }
             
-            std::string promptName = requestJson["params"]["name"].get<std::string>();
-            json arguments = requestJson["params"].value("arguments", json::object());
+            std::string promptName = params["name"].get<std::string>();
+            json arguments = params.value("arguments", json::object());
             
             Logger::Info("Getting prompt: {} with args: {}", promptName, arguments.dump());
             
@@ -723,6 +903,16 @@ std::string MCPHttpServer::HandleMCPMethod(const std::string& method, const std:
             
             return response.dump();
             
+        } catch (const json::exception& e) {
+            Logger::Error("Invalid params in prompts/get: {}", e.what());
+            return json({
+                {"jsonrpc", "2.0"},
+                {"id", requestId == "null" ? nullptr : json::parse(requestId)},
+                {"error", {
+                    {"code", -32602},
+                    {"message", std::string("Invalid params: ") + e.what()}
+                }}
+            }).dump();
         } catch (const std::exception& e) {
             Logger::Error("Exception in prompts/get: {}", e.what());
             return json({
@@ -755,6 +945,12 @@ bool MCPHttpServer::ParseHttpRequest(const std::string& request,
     if (secondSpace == std::string::npos) return false;
     
     path = request.substr(firstSpace + 1, secondSpace - firstSpace - 1);
+
+    // Normalize route path by dropping query parameters.
+    const size_t queryPos = path.find('?');
+    if (queryPos != std::string::npos) {
+        path = path.substr(0, queryPos);
+    }
     
     // 鎻愬彇 body锛堝湪 \r\n\r\n 涔嬪悗锛?
     size_t bodyStart = request.find("\r\n\r\n");

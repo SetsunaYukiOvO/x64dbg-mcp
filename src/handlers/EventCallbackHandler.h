@@ -2,6 +2,7 @@
 #include <nlohmann/json.hpp>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <string>
 
 namespace MCP {
@@ -120,6 +121,7 @@ private:
     
     bool m_eventsEnabled = true;
     std::map<EventType, bool> m_eventFilters;
+    mutable std::mutex m_mutex;
 };
 
 } // namespace MCP

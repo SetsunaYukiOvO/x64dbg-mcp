@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 #include <string>
+#include <mutex>
 
 using json = nlohmann::json;
 
@@ -19,4 +20,5 @@ public:
 private:
     static std::string lastResult;
     static bool lastSuccess;
+    static std::mutex resultMutex;
 };

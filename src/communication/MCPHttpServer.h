@@ -11,9 +11,12 @@
 #include <string>
 #include <thread>
 #include <atomic>
+#include <future>
 #include <memory>
 #include <functional>
 #include <vector>
+#include <mutex>
+#include <unordered_set>
 #include <winsock2.h>
 #include <nlohmann/json_fwd.hpp>
 
@@ -63,7 +66,7 @@ private:
     std::string HandleMCPMethod(const std::string& method, const std::string& requestId, const std::string& body);
     
     // 解析 JSON-RPC 请求
-    bool ParseJsonRpcRequest(const std::string& json, std::string& method, std::string& requestId);
+    bool ParseJsonRpcRequest(const std::string& json, std::string& method, std::string& requestId, bool& hasRequestId);
     
     // 调用 MCP 工具
     std::string CallMCPTool(const std::string& toolName, const nlohmann::json& arguments);
@@ -78,13 +81,18 @@ private:
     
     // 发送 SSE 事件
     void SendSSEEvent(SOCKET socket, const std::string& event, const std::string& data);
+    void CleanupFinishedClientTasks();
 
     std::string m_host;
     int m_port;
     SOCKET m_listenSocket;
     std::atomic<bool> m_running;
     std::thread m_serverThread;
-    int m_requestId;
+    std::vector<std::future<void>> m_clientTasks;
+    std::mutex m_clientTasksMutex;
+    std::unordered_set<SOCKET> m_activeClientSockets;
+    std::mutex m_activeClientSocketsMutex;
+    std::atomic<int> m_requestId;
 };
 
 } // namespace MCP

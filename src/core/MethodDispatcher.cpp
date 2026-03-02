@@ -139,6 +139,8 @@ json MethodDispatcher::ExecuteMethod(const std::string& method, const json& para
         return handler(params);
     } catch (const MCPException&) {
         throw; // rethrow MCP exceptions
+    } catch (const json::exception& ex) {
+        throw InvalidParamsException("Invalid params: " + std::string(ex.what()));
     } catch (const std::exception& ex) {
         throw MCPException("Error executing method: " + std::string(ex.what()));
     }

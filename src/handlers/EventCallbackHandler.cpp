@@ -14,6 +14,7 @@ EventCallbackHandler& EventCallbackHandler::Instance() {
 
 void EventCallbackHandler::Initialize() {
     Logger::Info("Initializing event callback handler");
+    std::lock_guard<std::mutex> lock(m_mutex);
     
     // 默认启用所有事件
     m_eventsEnabled = true;
@@ -27,15 +28,18 @@ void EventCallbackHandler::Initialize() {
 
 void EventCallbackHandler::Cleanup() {
     Logger::Info("Cleaning up event callback handler");
+    std::lock_guard<std::mutex> lock(m_mutex);
     m_eventsEnabled = false;
 }
 
 void EventCallbackHandler::SetEventsEnabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(m_mutex);
     m_eventsEnabled = enabled;
     Logger::Info("Events {}", enabled ? "enabled" : "disabled");
 }
 
 void EventCallbackHandler::SetEventFilter(EventType eventType, bool enabled) {
+    std::lock_guard<std::mutex> lock(m_mutex);
     m_eventFilters[eventType] = enabled;
     Logger::Debug("Event filter for {} set to {}", 
                   EventTypeToString(eventType), 
@@ -44,8 +48,15 @@ void EventCallbackHandler::SetEventFilter(EventType eventType, bool enabled) {
 
 void EventCallbackHandler::OnBreakpoint(uint64_t address) {
     auto& instance = Instance();
-    
-    if (!instance.m_eventsEnabled || !instance.m_eventFilters[EventType::Breakpoint]) {
+
+    bool shouldBroadcast = false;
+    {
+        std::lock_guard<std::mutex> lock(instance.m_mutex);
+        const auto it = instance.m_eventFilters.find(EventType::Breakpoint);
+        shouldBroadcast = instance.m_eventsEnabled &&
+                         it != instance.m_eventFilters.end() && it->second;
+    }
+    if (!shouldBroadcast) {
         return;
     }
     
@@ -61,8 +72,15 @@ void EventCallbackHandler::OnBreakpoint(uint64_t address) {
 
 void EventCallbackHandler::OnException(uint32_t code, uint64_t address) {
     auto& instance = Instance();
-    
-    if (!instance.m_eventsEnabled || !instance.m_eventFilters[EventType::Exception]) {
+
+    bool shouldBroadcast = false;
+    {
+        std::lock_guard<std::mutex> lock(instance.m_mutex);
+        const auto it = instance.m_eventFilters.find(EventType::Exception);
+        shouldBroadcast = instance.m_eventsEnabled &&
+                         it != instance.m_eventFilters.end() && it->second;
+    }
+    if (!shouldBroadcast) {
         return;
     }
     
@@ -84,44 +102,67 @@ void EventCallbackHandler::OnException(uint32_t code, uint64_t address) {
 
 void EventCallbackHandler::OnModuleLoad(const char* name, uint64_t base, uint64_t size) {
     auto& instance = Instance();
-    
-    if (!instance.m_eventsEnabled || !instance.m_eventFilters[EventType::ModuleLoaded]) {
+
+    bool shouldBroadcast = false;
+    {
+        std::lock_guard<std::mutex> lock(instance.m_mutex);
+        const auto it = instance.m_eventFilters.find(EventType::ModuleLoaded);
+        shouldBroadcast = instance.m_eventsEnabled &&
+                         it != instance.m_eventFilters.end() && it->second;
+    }
+    if (!shouldBroadcast) {
         return;
     }
     
     ModuleEvent event;
     event.type = EventType::ModuleLoaded;
     event.timestamp = std::chrono::system_clock::now().time_since_epoch().count();
-    event.moduleName = name ? name : "";
+    const std::string safeName = name ? name : "";
+    event.moduleName = safeName;
     event.base = base;
     event.size = size;
     
     instance.BroadcastEvent(event);
-    Logger::Info("Module loaded: {} at 0x{:X}", name, base);
+    Logger::Info("Module loaded: {} at 0x{:X}", safeName, base);
 }
 
 void EventCallbackHandler::OnModuleUnload(const char* name) {
     auto& instance = Instance();
-    
-    if (!instance.m_eventsEnabled || !instance.m_eventFilters[EventType::ModuleUnloaded]) {
+
+    bool shouldBroadcast = false;
+    {
+        std::lock_guard<std::mutex> lock(instance.m_mutex);
+        const auto it = instance.m_eventFilters.find(EventType::ModuleUnloaded);
+        shouldBroadcast = instance.m_eventsEnabled &&
+                         it != instance.m_eventFilters.end() && it->second;
+    }
+    if (!shouldBroadcast) {
         return;
     }
     
     ModuleEvent event;
     event.type = EventType::ModuleUnloaded;
     event.timestamp = std::chrono::system_clock::now().time_since_epoch().count();
-    event.moduleName = name ? name : "";
+    const std::string safeName = name ? name : "";
+    event.moduleName = safeName;
     event.base = 0;
     event.size = 0;
     
     instance.BroadcastEvent(event);
-    Logger::Info("Module unloaded: {}", name);
+    Logger::Info("Module unloaded: {}", safeName);
 }
 
 void EventCallbackHandler::OnCreateProcess() {
     auto& instance = Instance();
-    
-    if (!instance.m_eventsEnabled || !instance.m_eventFilters[EventType::ProcessCreated]) {
+
+    bool shouldBroadcast = false;
+    {
+        std::lock_guard<std::mutex> lock(instance.m_mutex);
+        const auto it = instance.m_eventFilters.find(EventType::ProcessCreated);
+        shouldBroadcast = instance.m_eventsEnabled &&
+                         it != instance.m_eventFilters.end() && it->second;
+    }
+    if (!shouldBroadcast) {
         return;
     }
     
@@ -145,8 +186,15 @@ void EventCallbackHandler::OnCreateProcess() {
 
 void EventCallbackHandler::OnExitProcess() {
     auto& instance = Instance();
-    
-    if (!instance.m_eventsEnabled || !instance.m_eventFilters[EventType::ProcessExited]) {
+
+    bool shouldBroadcast = false;
+    {
+        std::lock_guard<std::mutex> lock(instance.m_mutex);
+        const auto it = instance.m_eventFilters.find(EventType::ProcessExited);
+        shouldBroadcast = instance.m_eventsEnabled &&
+                         it != instance.m_eventFilters.end() && it->second;
+    }
+    if (!shouldBroadcast) {
         return;
     }
     

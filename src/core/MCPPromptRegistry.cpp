@@ -80,11 +80,11 @@ std::string MCPPromptDefinition::GeneratePrompt(const json& args) const {
     }
     else if (name == "reverse-algorithm") {
         std::string start_address = args.value("start_address", "current");
-        std::string description = args.value("description", "");
+        std::string descriptionText = args.value("description", "");
         oss << "I need help reverse engineering an algorithm.\n\n"
             << "Location: " << start_address << "\n";
-        if (!description.empty()) {
-            oss << "Description: " << description << "\n";
+        if (!descriptionText.empty()) {
+            oss << "Description: " << descriptionText << "\n";
         }
         oss << "\nPlease:\n"
             << "1. Disassemble and analyze the code\n"

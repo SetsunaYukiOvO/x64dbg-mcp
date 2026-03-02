@@ -1,8 +1,10 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <mutex>
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <functional>
 
@@ -91,7 +93,7 @@ public:
      * @brief 处理客户端接收（在接收线程中调用）
      * @param clientId 客户端 ID
      */
-    void ProcessClientReceive(ClientId clientId);
+    bool ProcessClientReceive(ClientId clientId);
     
     /**
      * @brief 获取客户端数量
