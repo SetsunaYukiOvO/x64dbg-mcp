@@ -2,106 +2,125 @@
 
 [English](../README.md) | 中文
 
-一个为 x64dbg 和 x32dbg 实现的模型上下文协议（MCP）服务器插件，通过 JSON-RPC 2.0 接口实现远程调试。该插件允许外部应用程序和 AI 代理以编程方式与调试器交互。
+这是一个面向 x64dbg 与 x32dbg 的 Model Context Protocol (MCP) 服务器实现，通过 JSON-RPC 2.0 接口提供远程调试能力。该插件允许外部应用与 AI 代理以编程方式和调试器交互。
 
-**现已支持 x64 和 x86 双架构!**
+**现已同时支持 x64 和 x86 架构！**
 
 ## 功能特性
 
-- **JSON-RPC 2.0 协议**：标准的、与语言无关的接口
-- **HTTP + SSE 通信**：基于 Web 的现代化集成方式，使用服务器发送事件
-- **MCP 协议支持**：兼容模型上下文协议，支持 AI 代理集成
-- **全面的调试 API（69+ 方法）**：
-  - 执行控制（运行、暂停、单步、运行到指定地址）
-  - 内存读取/写入/搜索/分配
-  - 寄存器访问（50+ 寄存器，包括 GPR、SSE、AVX）
+- **完整 MCP 规范支持**：实现 MCP 三大核心构件
+  - **Tools（69）**：可由 AI 调用的调试函数
+  - **Resources（15）**：由应用控制的上下文数据源
+  - **Prompts（10）**：用户引导的调试工作流模板
+
+- **JSON-RPC 2.0 协议**：标准、语言无关的接口
+- **HTTP + SSE 通信**：通过 Server-Sent Events 提供现代 Web 集成
+
+- **Tools - AI 可控调试（69 个函数）**：
+  - 执行控制（run、pause、step、run_to）
+  - 内存读/写/搜索/分配
+  - 寄存器访问（50+ 寄存器，含 GPR、SSE、AVX）
   - 断点管理（软件断点、硬件断点、内存断点、条件断点、日志断点）
-  - 反汇编和符号解析
-  - 线程管理（列表、切换、挂起、恢复）
-  - 调用栈跟踪和分析
-  - **Dump与脱壳**（模块dump、内存dump、自动脱壳、OEP检测、IAT重建）
+  - 反汇编与符号解析
+  - 线程管理（列出、切换、挂起、恢复）
+  - 调用栈追踪与分析
+  - **Dump 与脱壳**（模块 dump、内存 dump、自动脱壳、OEP 检测、IAT 重建）
   - **脚本执行**（执行 x64dbg 命令、批量操作）
-  - **上下文快照**（捕获和比较调试状态）
-  - 通过 SSE 实现事件通知
+  - **上下文快照**（捕获并比较调试状态）
+
+- **Resources - 上下文提供器（15 个来源）**：
+  - 直接资源：调试器状态、寄存器、模块、线程、内存映射、断点、栈
+  - 资源模板：内存内容、反汇编、模块信息、符号解析、函数分析
+  - 只读、由应用控制的访问方式
+
+- **Prompts - 工作流模板（10 个提示）**：
+  - 崩溃分析、漏洞挖掘、函数追踪
+  - 二进制脱壳、算法逆向、执行对比
+  - 字符串狩猎、代码补丁、API 监控
+  - 调试会话初始化
+
 - **安全性**：基于权限的访问控制
-- **可扩展**：支持自定义方法的插件架构
+- **可扩展性**：支持自定义方法、资源与提示的插件架构
 
-## v1.0.2 新特性
+## v1.0.3 更新内容
 
-- 🐛 **缺陷修复**：修复了自动化测试发现的关键问题
-  - 修复 `breakpoint_toggle` 状态一致性问题
-  - 实现了真正的 `memory_search` 搜索功能
-  - 修复 `memory_get_info` 返回正确的内存区域基址
-  - 修复 `debug_step_over` RIP 同步时序问题
-  - 增强 `dump_detect_oep` 策略验证，提供清晰的错误消息
-  - 添加缺失的诊断字段（`error`、`encoding`、`progress`）
+- **通用化脱壳逻辑**
+  - 扩展转移/OEP 识别模式（`E9`、`EB`、`FF25`、`push-ret`、`mov-jmp`、`movabs-jmp`）
+  - 将 packed 检测重构为通用布局启发式评分模型
+  - 移除 `UPX2` 硬编码导入回退路径
 
-- 🔧 **构建系统改进**
-  - 双架构构建脚本：一次命令编译 x64 和 x86 两个版本
-  - 统一输出目录（`dist/`），方便管理
-  - 使用 `-j` 标志实现更快的并行编译
-  - 简化的构建选项：`--clean`、`--x64-only`、`--x86-only`
+- **Dump/脱壳稳定性修复**
+  - 修复 `dump_auto_unpack` 假成功场景（可能返回复制的壳层镜像）
+  - 修复导入回退破坏节区原始布局并导致 dumped EXE 崩溃的问题
+  - 提升 `debug_pause` 可靠性（强制中断 + 暂停状态确认）
+  - 修复 `dump_auto_unpack` 默认 `max_iterations` 不一致问题（`tools/list` 为 `10`，运行时曾为 `3`），现统一为 `10`
 
-- 📚 **文档清理**
-  - 删除冗余的技术文档
-  - 精简核心文档
+- **运行态恢复能力**
+  - 为 `dump_module`、`dump_analyze_module`、`dump_detect_oep` 增加自动暂停状态恢复
+  - 为 `dump_auto_unpack` 增加运行中且上下文位于目标模块外时的执行上下文恢复
+  - 提升运行态调用路径下自动脱壳可靠性
 
 ## 历史版本
 
+### v1.0.2
+
+- 自动化测试关键缺陷修复
+- 构建系统改进与双架构统一输出
+- 文档清理
+
 ### v1.0.1
 
-- 线程和调用栈管理 API
-- 增强的错误处理和日志系统
+- 线程与栈管理 API
+- 增强错误处理与日志
 
-完整的版本历史请参见 [CHANGELOG_CN.md](../CHANGELOG_CN.md)
+完整版本历史见 [CHANGELOG_CN.md](../CHANGELOG_CN.md)
 
 ## 从源码构建
 
-### 环境要求
+### 前置要求
 
-- **Windows 10/11** (x64)
-- **CMake** 3.15 或更高版本
-- **Visual Studio 2022** 及 C++ 桌面开发工作负载
-- **vcpkg** - C++ 包管理器
-- **Git** - 用于克隆仓库
+- **Windows 10/11**（x64）
+- **CMake** 3.15 或更高
+- **Visual Studio 2022**（安装 C++ 桌面开发工作负载）
+- **vcpkg**（C++ 依赖包管理器）
+- **Git**（用于克隆仓库）
 
 ### 快速构建
 
-使用提供的构建脚本最为简便：
+最简单的方式是使用仓库提供的构建脚本：
 
 ```powershell
 # 克隆仓库
 git clone https://github.com/SetsunaYukiOvO/x64dbg-mcp.git
 cd x64dbg-mcp
 
-# 同时构建 x64 和 x86 两个版本（推荐）
+# 同时构建 x64 和 x86（推荐）
 .\build.bat
 
-# 仅构建 x64 版本
+# 仅构建 x64
 .\build.bat --x64-only
 
-# 仅构建 x86 版本
+# 仅构建 x86
 .\build.bat --x86-only
 
-# 清理重新构建
+# 清理后重建
 .\build.bat --clean
 
 # 脚本将自动：
 # 1. 检测 vcpkg 安装
-# 2. 下载依赖项 (nlohmann_json)
-# 3. 为两个架构配置 CMake
+# 2. 下载依赖（nlohmann_json）
+# 3. 为双架构配置 CMake
 # 4. 使用 Visual Studio 并行编译
 # 5. 将输出文件复制到 dist/ 目录
 ```
 
 构建脚本选项：
 ```powershell
-.\build.bat               # 构建 x64 和 x86 两个版本（Release）
-.\build.bat --clean       # 清理后重新构建两个版本
-.\build.bat --x64-only    # 仅构建 x64 版本
-.\build.bat --x86-only    # 仅构建 x86 版本
+.\build.bat               # 构建 x64 + x86（Release）
+.\build.bat --clean       # 清理并重建双架构
+.\build.bat --x64-only    # 仅构建 x64
+.\build.bat --x86-only    # 仅构建 x86
 .\build.bat --debug       # Debug 构建（未来支持）
-.\build.bat --help        # 显示所有选项
 ```
 
 **输出文件**（位于 `dist/` 目录）：
@@ -110,9 +129,9 @@ cd x64dbg-mcp
 
 ### 手动构建步骤
 
-如果您更喜欢手动控制：
+如果你希望手动控制流程：
 
-1. **安装 vcpkg**（如果尚未安装）：
+1. **安装 vcpkg**（如未安装）：
 ```powershell
 git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg
 C:\vcpkg\bootstrap-vcpkg.bat
@@ -143,35 +162,35 @@ cmake -B build -G "Visual Studio 17 2022" -A Win32 ^
 cmake --build build --config Release
 ```
 
-5. **输出文件**：
+5. **输出**：
 - 插件文件：`build\bin\Release\x64dbg_mcp.dp64`（约 611 KB）
 
 ## 安装
 
-1. 将编译好的插件复制到对应的调试器目录：
+1. 将编译好的插件复制到对应调试器目录：
 
 ```powershell
-# 对于 x64dbg（64位）
-# 将 <x64dbg路径> 替换为你的实际 x64dbg 安装目录
-copy dist\x64dbg_mcp.dp64 <x64dbg路径>\x64\plugins\
+# x64dbg（64 位）
+# 将 <x64dbg-path> 替换为你的实际安装目录
+copy dist\x64dbg_mcp.dp64 <x64dbg-path>\x64\plugins\
 
-# 对于 x32dbg（32位）
-copy dist\x32dbg_mcp.dp32 <x64dbg路径>\x32\plugins\
+# x32dbg（32 位）
+copy dist\x32dbg_mcp.dp32 <x64dbg-path>\x32\plugins\
 
-# 示例（如果安装在 D:\Tools\x64dbg）：
-# copy dist\x64dbg_mcp.dp64 D:\Tools\x64dbg\x64\plugins\
-# copy dist\x32dbg_mcp.dp32 D:\Tools\x64dbg\x32\plugins\
+# 示例（安装在 C:\x64dbg）：
+# copy dist\x64dbg_mcp.dp64 C:\x64dbg\x64\plugins\
+# copy dist\x32dbg_mcp.dp32 C:\x64dbg\x32\plugins\
 ```
 
 2. （可选）复制配置文件：
 ```powershell
-# 为 x64dbg 创建配置目录
-mkdir <x64dbg路径>\x64\plugins\x64dbg-mcp
-copy config.json <x64dbg路径>\x64\plugins\x64dbg-mcp\
+# x64dbg
+mkdir <x64dbg-path>\x64\plugins\x64dbg-mcp
+copy config.json <x64dbg-path>\x64\plugins\x64dbg-mcp\
 
-# 为 x32dbg 创建配置目录
-mkdir <x64dbg路径>\x32\plugins\x32dbg-mcp
-copy config.json <x64dbg路径>\x32\plugins\x32dbg-mcp\
+# x32dbg
+mkdir <x64dbg-path>\x32\plugins\x32dbg-mcp
+copy config.json <x64dbg-path>\x32\plugins\x32dbg-mcp\
 ```
 
 3. 重启 x64dbg/x32dbg 以加载插件
@@ -181,17 +200,17 @@ copy config.json <x64dbg路径>\x32\plugins\x32dbg-mcp\
 ### 启动服务器
 
 1. 打开 x64dbg
-2. 导航到 **插件 → MCP Server → Start MCP HTTP Server**
-3. 服务器将在配置的端口上启动（默认：3000）
-4. 访问 `http://127.0.0.1:3000` 可测试服务器
+2. 进入 **Plugins -> MCP Server -> Start MCP HTTP Server**
+3. 服务器会在配置端口启动（默认：3000）
+4. 访问 `http://127.0.0.1:3000`
 
 ### 配置
 
-编辑 `config.json` 来自定义设置：
+编辑 `config.json` 自定义设置：
 
 ```json
 {
-  "version": "1.0.1",
+  "version": "1.0.3",
   "server": {
     "address": "127.0.0.1",
     "port": 3000
@@ -212,7 +231,7 @@ copy config.json <x64dbg路径>\x32\plugins\x32dbg-mcp\
 
 ### 客户端示例
 
-Python 客户端示例（使用 HTTP）：
+使用 HTTP 的 Python 客户端示例：
 
 ```python
 import requests
@@ -250,19 +269,19 @@ class MCPClient:
             if line:
                 yield line.decode('utf-8')
 
-# 使用
+# 用法
 client = MCPClient()
 print(client.call("initialize"))
 print(client.call("tools/list"))
 
 # 订阅调试事件
 for event in client.subscribe_events():
-    print(f"事件: {event}")
+    print(f"Event: {event}")
 ```
 
 ### VS Code 集成
 
-在 VS Code 设置或 MCP 客户端配置中：
+在 VS Code 设置或 MCP 客户端配置中添加：
 
 ```json
 {
@@ -285,9 +304,9 @@ for event in client.subscribe_events():
 ### 调试控制
 - `debug.run` - 继续执行
 - `debug.pause` - 暂停执行
-- `debug.step_into` - 单步进入指令
-- `debug.step_over` - 单步跨过指令
-- `debug.step_out` - 跳出函数
+- `debug.step_into` - 单步进入
+- `debug.step_over` - 单步越过
+- `debug.step_out` - 单步跳出函数
 - `debug.get_state` - 获取当前调试状态
 - `debug.run_to` - 运行到指定地址
 - `debug.restart` - 重启调试会话
@@ -297,7 +316,7 @@ for event in client.subscribe_events():
 - `register.get` - 读取单个寄存器
 - `register.set` - 写入寄存器值
 - `register.list` - 列出所有寄存器
-- `register.get_batch` - 读取多个寄存器
+- `register.get_batch` - 批量读取寄存器
 
 ### 内存操作
 - `memory.read` - 读取内存区域
@@ -306,7 +325,7 @@ for event in client.subscribe_events():
 - `memory.get_info` - 获取内存区域信息
 - `memory.enumerate` - 列出所有内存区域
 - `memory.allocate` - 分配内存
-- `memory.free` - 释放已分配的内存
+- `memory.free` - 释放分配的内存
 
 ### 断点管理
 - `breakpoint.set` - 设置断点
@@ -328,16 +347,16 @@ for event in client.subscribe_events():
 
 ### 符号解析
 - `symbol.resolve` - 将符号解析为地址
-- `symbol.from_address` - 从地址获取符号
+- `symbol.from_address` - 由地址获取符号
 - `symbol.search` - 按模式搜索符号
 - `symbol.list` - 列出所有符号
-- `symbol.modules` - 列出已加载的模块
+- `symbol.modules` - 列出已加载模块
 - `symbol.set_label` - 设置符号标签
 - `symbol.set_comment` - 设置符号注释
 - `symbol.get_comment` - 获取符号注释
 
 ### 模块操作
-- `module.list` - 列出所有已加载的模块
+- `module.list` - 列出所有已加载模块
 - `module.get` - 获取模块信息
 - `module.get_main` - 获取主模块
 
@@ -351,80 +370,78 @@ for event in client.subscribe_events():
 - `thread.get_count` - 获取线程数量
 
 ### 栈操作
-- `stack.get_trace` - 获取栈回溯
+- `stack.get_trace` - 获取调用栈
 - `stack.read_frame` - 读取栈帧
 - `stack.get_pointers` - 获取栈指针（RSP、RBP）
-- `stack.is_on_stack` - 检查地址是否在栈上
+- `stack.is_on_stack` - 检查地址是否位于栈上
 
-有关完整的方法签名和示例，请参见源代码中的内联文档或使用 `system.methods` API 调用。
+完整方法签名与示例请查看源码内联文档，或调用 `system.methods` API。
 
 ## 架构
 
-插件分为四层：
+该插件分为四层：
 
-1. **通信层**：HTTP 服务器，支持 SSE 实时事件推送
-2. **协议层**：JSON-RPC 和 MCP 协议解析、验证、分发
+1. **通信层**：带 SSE 支持的 HTTP 服务，用于实时事件流
+2. **协议层**：JSON-RPC 与 MCP 协议解析、校验与分发
 3. **业务层**：调试操作、内存管理、符号解析
 4. **插件层**：x64dbg 集成、事件处理、回调管理
 
 ### 核心组件
 
-- **MCPHttpServer**：HTTP 服务器，带 SSE 端点用于事件流
-- **MethodDispatcher**：将 JSON-RPC 调用路由到相应的处理器
-- **业务管理器**：DebugController、MemoryManager、RegisterManager 等
-- **事件系统**：通过 SSE 实现实时调试事件通知
+- **MCPHttpServer**：带 SSE 事件流端点的 HTTP 服务器
+- **MethodDispatcher**：将 JSON-RPC 调用路由到对应处理器
+- **Business Managers**：DebugController、MemoryManager、RegisterManager 等
+- **Event System**：通过 SSE 推送实时调试事件通知
 
 ## 安全注意事项
 
-- 默认情况下，内存和寄存器写入操作是**禁用**的
-- 仅在需要时在 `config.json` 中启用写入权限
-- 服务器默认监听本地主机（127.0.0.1）
-- 单客户端连接限制可防止资源耗尽
+- 默认情况下，内存和寄存器写操作为 **禁用**
+- 仅在必要时于 `config.json` 中启用写权限
+- 服务默认监听本地地址（127.0.0.1）
+- 单客户端连接限制可避免资源耗尽
 - 所有操作都要求调试器处于暂停状态
 
-## 故障排除
+## 故障排查
 
 ### 插件未加载
-- 确保插件文件在正确的目录中
-- 检查 x64dbg 日志以查找错误消息
-- 验证 x64dbg 版本兼容性（需要 x64dbg build 2023+）
+- 确认插件文件位于正确目录
+- 检查 x64dbg 日志中的错误信息
+- 验证 x64dbg 版本兼容性（要求 x64dbg build 2023+）
 
 ### 服务器无法启动
 - 检查端口 3000 是否已被占用
-- 验证 config.json 是否为有效的 JSON
+- 验证 config.json 是否为合法 JSON
 - 检查插件目录的文件权限
-- 查看 x64dbg 日志文件获取详细错误信息
+- 查看 x64dbg 日志获取详细错误
 
 ### 连接被拒绝
-- 确保通过插件菜单启动了 HTTP 服务器（"Start MCP HTTP Server"）
-- 检查防火墙设置，允许端口 3000
-- 验证客户端连接到 http://127.0.0.1:3000
-- 可在浏览器中访问 http://127.0.0.1:3000 测试连接
+- 确保已通过插件菜单启动 HTTP 服务（"Start MCP HTTP Server"）
+- 检查防火墙对 3000 端口的设置
+- 确认客户端连接地址为 `http://127.0.0.1:3000`
+- 可在浏览器访问 `http://127.0.0.1:3000` 进行连通性测试
 
 ## 贡献
 
-欢迎贡献！请：
-1. Fork 本仓库
+欢迎贡献。请按以下流程：
+1. Fork 仓库
 2. 创建功能分支
-3. 使用清晰的提交消息进行更改
+3. 进行修改并提交清晰的 commit 信息
 4. 提交 Pull Request
-
-详细信息请参见 [CONTRIBUTING_CN.md](CONTRIBUTING_CN.md)。
 
 ## 许可证
 
-本项目采用 MIT 许可证 - 详见 LICENSE 文件。
+本项目采用 MIT 许可证，详见 LICENSE 文件。
 
 ## 致谢
 
-- [x64dbg](https://x64dbg.com/) - 本插件扩展的调试器
+- [x64dbg](https://x64dbg.com/) - 本插件所扩展的调试器
 - [nlohmann/json](https://github.com/nlohmann/json) - JSON 库
-- 模型上下文协议规范
+- Model Context Protocol 规范
 
 ## 联系方式
 
-- GitHub Issues：用于错误报告和功能请求
+- GitHub Issues：用于缺陷反馈和功能请求
 
 ---
 
-**注意**：这是实验性软件。使用风险自负。在用于关键应用程序之前，请务必在安全环境中进行测试。
+**注意**：这是实验性软件。请自行承担使用风险，在关键场景使用前务必先在安全环境中测试。

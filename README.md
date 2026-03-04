@@ -42,27 +42,31 @@ A Model Context Protocol (MCP) server implementation for x64dbg and x32dbg, enab
 - **Security**: Permission-based access control
 - **Extensible**: Plugin architecture for custom methods, resources, and prompts
 
-## What's New in v1.0.2
+## What's New in v1.0.3
 
-- 🐛 **Bug Fixes**: Fixed critical issues from automated testing
-  - Fixed `breakpoint_toggle` state consistency
-  - Implemented actual `memory_search` functionality
-  - Fixed `memory_get_info` to return correct region base address
-  - Fixed `debug_step_over` RIP synchronization timing
-  - Enhanced `dump_detect_oep` strategy validation with clear error messages
-  - Added missing diagnostic fields (`error`, `encoding`, `progress`)
+- **Generalized Unpacking (Not UPX-only)**
+  - Expanded transfer/OEP recognition patterns (`E9`, `EB`, `FF25`, `push-ret`, `mov-jmp`, `movabs-jmp`)
+  - Reworked packed detection into generic layout heuristics
+  - Removed `UPX2` hardcoded import fallback path
 
-- 🔧 **Build System Improvements**
-  - Dual architecture build script: compile both x64 and x86 in one command
-  - Unified output directory (`dist/`) for both architectures
-  - Faster parallel compilation with `-j` flag
-  - Simplified build options: `--clean`, `--x64-only`, `--x86-only`
+- **Dump/Unpack Stability Fixes**
+  - Fixed false-success unpack scenarios that could return copied packed images
+  - Fixed import fallback corrupting section raw layout and causing dumped EXE crashes
+  - Improved `debug_pause` reliability (forced break + pause state confirmation)
+  - Fixed `dump_auto_unpack` default `max_iterations` mismatch (`tools/list` showed `10` while runtime used `3`); default behavior is now consistently `10`
 
-- 📚 **Documentation Cleanup**
-  - Removed redundant technical documentation
-  - Streamlined core documentation
+- **Running-State Recovery**
+  - Added automatic paused-state recovery for `dump_module`, `dump_analyze_module`, and `dump_detect_oep`
+  - Added execution-context recovery for `dump_auto_unpack` when called mid-run outside target module
+  - Improved auto-unpack reliability for running-state invocation paths
 
 ## Previous Releases
+
+### v1.0.2
+
+- Automated testing critical bug fixes
+- Build system improvements and unified dual-architecture output
+- Documentation cleanup
 
 ### v1.0.1
 
@@ -206,7 +210,7 @@ Edit `config.json` to customize settings:
 
 ```json
 {
-  "version": "1.0.1",
+  "version": "1.0.3",
   "server": {
     "address": "127.0.0.1",
     "port": 3000

@@ -5,6 +5,41 @@ All notable changes to the x64dbg MCP Server Plugin will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-03-04
+
+### Fixed
+- **Dump/Unpacking Stability and Regression Fixes**
+  - Fixed `dump_auto_unpack` false-success behavior where packed images could be copied without real unpacking
+  - Fixed import-table fallback corrupting dump section raw layout (`PointerToRawData`/`SizeOfRawData`) and causing runtime crashes
+  - Fixed `debug_pause` returning success without actually interrupting a running target in some scenarios
+  - Fixed `dump_auto_unpack` default iteration inconsistency:
+    - `tools/list` exposed `max_iterations=10` while runtime fallback was `3`
+    - runtime default is now aligned to `10`
+  - Fixed dump tool behavior in running state:
+    - `dump_module` no longer fails with `Debugger is not paused` without recovery attempt
+    - `dump_analyze_module` no longer silently misreports `is_packed=false` due to paused-state dependency
+    - `dump_detect_oep` no longer fails/misreports when called while target is running
+  - Fixed `dump_auto_unpack` failing when invoked while execution context is outside target module range
+- **Thread Switching Reliability and State Consistency**
+  - Fixed `thread.switch` using decimal TID text (e.g. `8164`) that could be interpreted as hex expression by x64dbg command parser
+  - `thread.switch`/`thread.suspend`/`thread.resume` now send explicit `0xHEX` thread IDs to command layer
+  - Added post-switch verification loop in `ThreadManager::SwitchThread` to confirm `GetCurrentThreadId()==target` before reporting success
+  - Fixed `thread.switch` response mismatch:
+    - added `requested_id`
+    - `current_id` now reports the actual current thread after switch, not just the requested value
+
+### Changed
+- **Generalized Unpacking Logic (No UPX-only Flow)**
+  - Generalized transfer/OEP pattern recognition for unpack transitions:
+    - `E9 rel32`, `EB rel8`, `FF 25` indirect jump
+    - `push imm32; ret`
+    - `mov reg, imm; jmp reg` (x86/x64)
+    - `movabs reg, imm64; jmp reg` (x64)
+  - Reworked packed detection into a layout/heuristic score model instead of UPX-special-case branching
+  - Removed `UPX2` hardcoded import fallback and replaced it with generic import-related section heuristics
+  - Added automatic paused-state recovery for dump/analyze/OEP detection entry points
+  - Added module-context recovery path for `dump_auto_unpack` when invoked mid-run outside target module
+
 ## [1.0.2] - 2025-12-16
 
 ### Fixed
@@ -166,6 +201,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Release Date | Key Features |
 |---------|-------------|--------------|
+| 1.0.3 | 2026-03-04 | Generalized unpacking flow, running-state dump recovery, auto-unpack stability fixes, thread-switch consistency fixes |
 | 1.1.0 | TBD | Dual architecture, Dump & unpacking, Script execution, Context snapshots |
 | 1.0.0 | 2025-11-18 | Initial public release |
 
