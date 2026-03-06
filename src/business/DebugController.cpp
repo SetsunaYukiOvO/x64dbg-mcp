@@ -3,8 +3,55 @@
 #include "../core/Logger.h"
 #include "../core/Exceptions.h"
 #include "../core/X64DBGBridge.h"
+#include <limits>
 
 namespace MCP {
+
+namespace {
+
+bool IsExecutableProtection(DWORD protection) {
+    const DWORD access = protection & 0xFF;
+    switch (access) {
+        case PAGE_EXECUTE:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool IsRunToTargetAddressValid(uint64_t address) {
+    if (address == 0 || address > std::numeric_limits<duint>::max()) {
+        return false;
+    }
+
+    if (!DbgMemIsValidReadPtr(static_cast<duint>(address))) {
+        return false;
+    }
+
+    HANDLE processHandle = DbgGetProcessHandle();
+    if (processHandle == nullptr || processHandle == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    MEMORY_BASIC_INFORMATION mbi = {};
+    SIZE_T queried = VirtualQueryEx(
+        processHandle,
+        reinterpret_cast<LPCVOID>(address),
+        &mbi,
+        sizeof(mbi)
+    );
+
+    if (queried == 0 || mbi.State != MEM_COMMIT) {
+        return false;
+    }
+
+    return IsExecutableProtection(mbi.Protect);
+}
+
+} // namespace
 
 DebugController& DebugController::Instance() {
     static DebugController instance;
@@ -161,12 +208,42 @@ bool DebugController::RunToAddress(uint64_t address) {
     if (!IsPaused()) {
         throw DebuggerNotPausedException();
     }
+
+    if (!IsRunToTargetAddressValid(address)) {
+        Logger::Warning("RunToAddress rejected invalid target: 0x{:X}", address);
+        return false;
+    }
+
+    // If we're already at the target address, avoid unnecessary execution.
+    if (GetInstructionPointer() == address) {
+        Logger::Debug("RunToAddress target already reached: 0x{:X}", address);
+        return true;
+    }
     
     char command[64];
     sprintf_s(command, "rtu %llX", address);
     
     Logger::Debug("Executing run to address: 0x{:X}", address);
-    return ExecuteCommand(command);
+    if (!ExecuteCommand(command)) {
+        return false;
+    }
+
+    if (!WaitForPause(10000)) {
+        Logger::Warning("RunToAddress timed out waiting for pause at target 0x{:X}", address);
+        return false;
+    }
+
+    const uint64_t rip = GetInstructionPointer();
+    if (rip != address) {
+        Logger::Warning(
+            "RunToAddress paused at unexpected address. target=0x{:X}, current=0x{:X}",
+            address,
+            rip
+        );
+        return false;
+    }
+
+    return true;
 }
 
 bool DebugController::Restart() {

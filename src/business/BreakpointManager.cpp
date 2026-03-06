@@ -108,10 +108,41 @@ bool BreakpointManager::DeleteBreakpoint(uint64_t address, std::optional<Breakpo
     
     Logger::Debug("Deleting breakpoint at 0x{:X}", address);
     
-    // 首先检查断点是否存在
+    // Check with both direct query and full list, because mixed-type breakpoints
+    // at the same address can be missed by DbgGetBpxTypeAt in some states.
     int existingType = DbgGetBpxTypeAt(address);
+
+    int listedType = bp_none;
+    BPMAP bpMap;
+    bpMap.count = 0;
+    bpMap.bp = nullptr;
+
+    int listedCount = DbgGetBpList(bp_none, &bpMap);
+    if (listedCount > 0 && bpMap.bp != nullptr) {
+        for (int i = 0; i < listedCount; i++) {
+            const BRIDGEBP& bp = bpMap.bp[i];
+            if (bp.addr != address) {
+                continue;
+            }
+
+            if (bp.type == bp_normal) {
+                listedType |= bp_normal;
+            } else if (bp.type == bp_hardware) {
+                listedType |= bp_hardware;
+            } else if (bp.type == bp_memory) {
+                listedType |= bp_memory;
+            }
+        }
+    }
+
+    if (bpMap.bp != nullptr) {
+        BridgeFree(bpMap.bp);
+    }
+
+    existingType |= listedType;
+
     if (existingType == bp_none) {
-        std::string msg = "No breakpoint exists at address: " + 
+        std::string msg = "No breakpoint exists at address: " +
                          StringUtils::FormatAddress(address);
         Logger::Warning(msg);
         throw ResourceNotFoundException(msg);
@@ -308,19 +339,37 @@ std::vector<BreakpointInfo> BreakpointManager::ListBreakpoints(std::optional<Bre
     if (count > 0 && bpMap.bp != nullptr) {
         for (int i = 0; i < count; i++) {
             const BRIDGEBP& bp = bpMap.bp[i];
-            
+
+            int expectedTypeBit = bp_none;
+            if (bp.type == bp_normal) {
+                expectedTypeBit = bp_normal;
+            } else if (bp.type == bp_hardware) {
+                expectedTypeBit = bp_hardware;
+            } else if (bp.type == bp_memory) {
+                expectedTypeBit = bp_memory;
+            } else {
+                continue;
+            }
+
+            // Filter out stale entries returned by DbgGetBpList.
+            // Keep only entries that still exist at address and type.
+            int currentType = DbgGetBpxTypeAt(bp.addr);
+            if (currentType == bp_none || !(currentType & expectedTypeBit)) {
+                continue;
+            }
+
             // 转换为 BreakpointInfo
             BreakpointInfo info;
             info.address = bp.addr;
             info.enabled = bp.enabled;
             info.name = bp.name;
-            
+
             // 确定断点类型（基于扩展类型字段）
             if (bp.type == bp_normal) {
                 info.type = BreakpointType::Software;
             } else if (bp.type == bp_hardware) {
                 info.type = BreakpointType::Hardware;
-                
+
                 // 硬件断点详细信息
                 switch (bp.typeEx) {
                     case 0: // BPHWEXEC
@@ -333,7 +382,7 @@ std::vector<BreakpointInfo> BreakpointManager::ListBreakpoints(std::optional<Bre
                         info.condition = HardwareBreakpointCondition::ReadWrite;
                         break;
                 }
-                
+
                 // 硬件断点大小
                 switch (bp.hwSize) {
                     case 0: info.size = HardwareBreakpointSize::Byte1; break;
@@ -343,7 +392,7 @@ std::vector<BreakpointInfo> BreakpointManager::ListBreakpoints(std::optional<Bre
                 }
             } else if (bp.type == bp_memory) {
                 info.type = BreakpointType::Memory;
-                
+
                 // 内存断点详细信息（使用 typeEx 判断访问类型）
                 switch (bp.typeEx) {
                     case 0: // Read
@@ -356,8 +405,6 @@ std::vector<BreakpointInfo> BreakpointManager::ListBreakpoints(std::optional<Bre
                         info.condition = HardwareBreakpointCondition::Execute;
                         break;
                 }
-            } else {
-                continue; // 跳过未知类型
             }
             
             // 应用类型过滤器

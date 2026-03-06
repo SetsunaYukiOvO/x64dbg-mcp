@@ -33,11 +33,13 @@ cmake-build-*/
 # IDE
 .vscode/
 .idea/
+.claude/
 
 # CMake
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
+CLAUDE.md
 Makefile
 
 # Temporary files
