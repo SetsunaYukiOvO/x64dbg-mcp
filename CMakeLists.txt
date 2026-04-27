@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(x64dbg_mcp VERSION 1.0.3 LANGUAGES CXX RC)
+project(x64dbg_mcp VERSION 1.0.4 LANGUAGES CXX RC)
 
 # C++17 标准
 set(CMAKE_CXX_STANDARD 17)
@@ -89,6 +89,11 @@ set(HANDLER_SOURCES
     src/handlers/ScriptHandler.cpp
     src/handlers/ContextHandler.cpp
     src/handlers/DumpHandler.cpp
+    src/handlers/ExpressionHandler.cpp
+    src/handlers/AnalysisHandler.cpp
+    src/handlers/AssemblerHandler.cpp
+    src/handlers/BookmarkHandler.cpp
+    src/handlers/PatchHandler.cpp
 )
 
 set(UTILS_SOURCES

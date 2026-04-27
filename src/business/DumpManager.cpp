@@ -13,6 +13,7 @@
 #include <cstring>
 #include <filesystem>
 #include <limits>
+#include <map>
 #include <windows.h>
 
 #ifdef XDBG_SDK_AVAILABLE
@@ -656,29 +657,7 @@ DumpResult DumpManager::DumpModule(
                 Logger::Warning("Failed to rebuild PE headers");
             }
         }
-        
-        updateProgress(DumpProgress::Stage::FixingImports, 50, "Fixing import table");
-        
-        // 淇瀵煎叆琛?
-        if (options.fixImports) {
-            if (ScyllaRebuildImports(moduleBase, buffer)) {
-                Logger::Info("Import table rebuilt successfully");
-            } else {
-                Logger::Warning("Failed to rebuild import table, using fallback");
-                FixImportTable(moduleBase, buffer);
-            }
-        }
-        
-        updateProgress(DumpProgress::Stage::FixingRelocations, 70, "Fixing relocations");
-        
-        // 淇閲嶅畾浣?
-        if (options.fixRelocations) {
-            // 浣跨敤褰撳墠鍩哄潃浣滀负棣栭€夊熀鍧€
-            if (!FixRelocations(moduleBase, moduleBase, buffer)) {
-                Logger::Warning("Failed to fix relocations");
-            }
-        }
-        
+
         // 绉婚櫎PE鏍￠獙鍜?
         if (options.removeIntegrityCheck) {
             FixPEChecksum(buffer);
@@ -776,307 +755,13 @@ DumpResult DumpManager::DumpMemoryRegion(
         result.finalProgress.success = false;
         Logger::Error("Memory dump failed: {}", e.what());
     }
-    
-    return result;
-}
 
-DumpResult DumpManager::AutoUnpackAndDump(
-    const std::string& moduleNameOrAddress,
-    const std::string& outputPath,
-    int maxIterations,
-    const std::string& oepStrategy,
-    ProgressCallback progressCallback)
-{
-    DumpResult result;
-    DumpProgress progress;
-    
-    auto updateProgress = [&](DumpProgress::Stage stage, int percent, const std::string& msg) {
-        progress.stage = stage;
-        progress.progress = percent;
-        progress.message = msg;
-        if (progressCallback) {
-            progressCallback(progress);
-        }
-        Logger::Info("[AutoUnpack] {}%: {}", percent, msg);
-    };
-
-    const auto waitForPause = [](uint32_t timeoutMs) -> bool {
-        const auto start = std::chrono::steady_clock::now();
-        while (true) {
-            if (DebugController::Instance().IsPaused()) {
-                return true;
-            }
-
-            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start
-            ).count();
-            if (elapsed >= timeoutMs) {
-                return false;
-            }
-
-            Sleep(10);
-        }
-    };
-
-    const auto ensurePaused = [&](uint32_t timeoutMs, const char* phase) -> bool {
-        auto& debugController = DebugController::Instance();
-        if (debugController.IsPaused()) {
-            return true;
-        }
-
-        try {
-            Logger::Info("Debugger is running before {}. Sending pause request...", phase);
-            if (!debugController.Pause()) {
-                Logger::Warning("Pause command failed before {}", phase);
-                return false;
-            }
-        } catch (const std::exception& e) {
-            Logger::Warning("Pause request threw before {}: {}", phase, e.what());
-            return false;
-        }
-
-        if (!waitForPause(timeoutMs)) {
-            Logger::Warning("Timed out waiting for paused state before {}", phase);
-            return false;
-        }
-
-        return true;
-    };
-    
-    try {
-        if (!DebugController::Instance().IsDebugging()) {
-            throw DebuggerNotRunningException();
-        }
-
-        if (maxIterations <= 0) {
-            throw InvalidParamsException("maxIterations must be greater than zero");
-        }
-
-        if (!ensurePaused(5000, "auto-unpack analysis")) {
-            throw MCPException("Failed to pause debugger before auto-unpack");
-        }
-
-        updateProgress(DumpProgress::Stage::Preparing, 0, "Analyzing target module");
-        
-        auto moduleBaseOpt = ParseModuleOrAddress(moduleNameOrAddress);
-        if (!moduleBaseOpt.has_value()) {
-            throw InvalidParamsException("Invalid module: " + moduleNameOrAddress);
-        }
-        
-        uint64_t moduleBase = moduleBaseOpt.value();
-        
-        // 鍒嗘瀽鏄惁鍔犲３
-        ModuleDumpInfo info = AnalyzeModule(moduleNameOrAddress);
-        updateProgress(DumpProgress::Stage::Preparing, 10, 
-                      info.isPacked ? "Packed module detected: " + info.packerId : "Module is not packed");
-        
-        Logger::Info("Module: {}, Base: {}, Packed: {}",
-                    info.name, StringUtils::FormatAddress(info.baseAddress), info.isPacked);
-        
-        if (!info.isPacked) {
-            // 鏈姞澹?鐩存帴dump
-            updateProgress(DumpProgress::Stage::Preparing, 20, "No packer detected, performing standard dump");
-            DumpOptions opts;
-            opts.autoDetectOEP = false;
-            return DumpModule(moduleNameOrAddress, outputPath, opts, progressCallback);
-        }
-        
-        // 鑷姩鑴卞３娴佺▼
-        updateProgress(DumpProgress::Stage::Preparing, 20, "Starting automatic unpacking");
-        const uint64_t declaredEntry = GetModuleEntryPoint(moduleBase);
-
-        if (!EnsureExecutionInModuleContext(info.path, moduleBase, info.size, "auto-unpack")) {
-            throw MCPException("Failed to recover target module execution context");
-        }
-
-        if (!ensurePaused(5000, "auto-unpack context ready")) {
-            throw MCPException("Failed to pause debugger before auto-unpack iteration");
-        }
-        
-        for (int iteration = 0; iteration < maxIterations; iteration++) {
-            int baseProgress = 20 + (iteration * 60 / maxIterations);
-            updateProgress(DumpProgress::Stage::Preparing, baseProgress, 
-                          "Unpacking iteration " + std::to_string(iteration + 1));
-
-            if (!ensurePaused(5000, "OEP detection")) {
-                Logger::Warning("Iteration {}: debugger could not be paused", iteration + 1);
-                continue;
-            }
-            
-            // 灏濊瘯妫€娴婳EP
-            auto oepOpt = DetectOEP(moduleBase, oepStrategy);
-            if (!oepOpt.has_value()) {
-                Logger::Warning("Failed to detect OEP in iteration {}", iteration + 1);
-                continue;
-            }
-            
-            uint64_t detectedOEP = oepOpt.value();
-            Logger::Info("Iteration {}: Detected OEP at {}",
-                         iteration + 1,
-                         StringUtils::FormatAddress(detectedOEP));
-            if (info.isPacked && detectedOEP == declaredEntry) {
-                Logger::Warning(
-                    "Iteration {}: detected OEP is still packed entry {}",
-                    iteration + 1,
-                    StringUtils::FormatAddress(detectedOEP)
-                );
-                continue;
-            }
-
-            // 鍦∣EP璁剧疆鏂偣
-            updateProgress(DumpProgress::Stage::Preparing, baseProgress + 10, 
-                          "Setting breakpoint at OEP");
-
-            bool reachedOEP = false;
-            bool breakpointSet = false;
-            auto& breakpointManager = BreakpointManager::Instance();
-            auto transferAddressOpt = FindTransferAddressToTarget(moduleBase, detectedOEP);
-            const uint64_t breakpointAddress = transferAddressOpt.value_or(detectedOEP);
-
-            try {
-                breakpointSet = breakpointManager.SetSoftwareBreakpoint(breakpointAddress, "__mcp_auto_oep");
-            } catch (const std::exception& e) {
-                Logger::Warning("Failed to set temporary OEP breakpoint at {}: {}",
-                                breakpointAddress, e.what());
-            }
-
-            if (!breakpointSet) {
-                Logger::Warning("Unable to set temporary OEP breakpoint at {}", breakpointAddress);
-                continue;
-            }
-
-            auto& debugController = DebugController::Instance();
-            for (int runAttempt = 0; runAttempt < 32; ++runAttempt) {
-                if (!debugController.Run()) {
-                    Logger::Warning("Run failed while waiting for OEP {}", detectedOEP);
-                    break;
-                }
-
-                if (!waitForPause(15000)) {
-                    Logger::Warning("Timed out waiting for pause while running to OEP {}",
-                                    detectedOEP);
-                    break;
-                }
-
-                uint64_t rip = 0;
-                try {
-                    rip = debugController.GetInstructionPointer();
-                } catch (...) {
-                    Logger::Warning("Failed to read RIP while waiting for OEP");
-                    break;
-                }
-
-                if (rip == detectedOEP) {
-                    reachedOEP = true;
-                    break;
-                }
-
-                if (rip == breakpointAddress && breakpointAddress != detectedOEP) {
-                    try {
-                        breakpointManager.DeleteBreakpoint(breakpointAddress, BreakpointType::Software);
-                    } catch (...) {
-                        // Continue even if temporary cleanup fails.
-                    }
-
-                    uint64_t steppedRip = 0;
-                    try {
-                        steppedRip = debugController.StepInto();
-                    } catch (const std::exception& e) {
-                        Logger::Warning("Step into transfer instruction failed: {}", e.what());
-                        break;
-                    }
-
-                    if (steppedRip == detectedOEP) {
-                        reachedOEP = true;
-                        break;
-                    }
-                }
-
-                if (rip >= moduleBase && rip < moduleBase + info.size) {
-                    try {
-                        breakpointManager.DeleteBreakpoint(rip, BreakpointType::Software);
-                        Logger::Info("Removed interfering software breakpoint at {}", rip);
-                    } catch (...) {
-                        // Not all stops are caused by removable software breakpoints.
-                    }
-                }
-
-                Logger::Info(
-                    "Stopped at {} while waiting for OEP {} (attempt {}/{})",
-                    rip,
-                    detectedOEP,
-                    runAttempt + 1,
-                    32
-                );
-            }
-
-            try {
-                breakpointManager.DeleteBreakpoint(breakpointAddress, BreakpointType::Software);
-            } catch (...) {
-                // Ignore cleanup failures for temporary breakpoint.
-            }
-
-            if (!reachedOEP) {
-                Logger::Warning("Failed to reach detected OEP {} in iteration {}",
-                                detectedOEP, iteration + 1);
-                continue;
-            }
-            
-            // 灏濊瘯dump
-            updateProgress(DumpProgress::Stage::ReadingMemory, baseProgress + 20, 
-                          "Dumping unpacked module");
-
-            if (!ensurePaused(5000, "dump writing")) {
-                Logger::Warning("Iteration {}: debugger is not paused before dump", iteration + 1);
-                continue;
-            }
-            
-            DumpOptions opts;
-            opts.autoDetectOEP = false;
-            opts.fixOEP = true;
-            opts.fixImports = true;
-            opts.rebuildPE = true;
-            opts.forcedOEP = detectedOEP;
-            
-            std::string iterOutputPath = outputPath;
-            if (iteration > 0) {
-                size_t dotPos = outputPath.find_last_of('.');
-                if (dotPos != std::string::npos) {
-                    iterOutputPath = outputPath.substr(0, dotPos) + 
-                                    "_iter" + std::to_string(iteration) + 
-                                    outputPath.substr(dotPos);
-                } else {
-                    iterOutputPath = outputPath + "_iter" + std::to_string(iteration);
-                }
-            }
-            
-            result = DumpModule(moduleNameOrAddress, iterOutputPath, opts, progressCallback);
-            
-            if (result.success) {
-                updateProgress(DumpProgress::Stage::Completed, 100, 
-                              "Auto-unpack completed after " + std::to_string(iteration + 1) + " iterations");
-                return result;
-            }
-        }
-        
-        // 鎵€鏈夎凯浠ｉ兘澶辫触
-        throw MCPException("Failed to unpack after " + std::to_string(maxIterations) + " iterations");
-        
-    } catch (const std::exception& e) {
-        result.success = false;
-        result.error = e.what();
-        progress.stage = DumpProgress::Stage::Failed;
-        progress.message = e.what();
-        result.finalProgress = progress;
-        Logger::Error("Auto-unpack failed: {}", e.what());
-    }
-    
     return result;
 }
 
 ModuleDumpInfo DumpManager::AnalyzeModule(const std::string& moduleNameOrAddress) {
     ModuleDumpInfo info;
-    
+
     try {
         if (!DebugController::Instance().IsDebugging()) {
             throw DebuggerNotRunningException();
@@ -1090,26 +775,24 @@ ModuleDumpInfo DumpManager::AnalyzeModule(const std::string& moduleNameOrAddress
         if (!moduleBaseOpt.has_value()) {
             throw InvalidParamsException("Invalid module");
         }
-        
+
         uint64_t moduleBase = moduleBaseOpt.value();
         info.baseAddress = moduleBase;
         info.size = GetModuleSize(moduleBase);
         info.entryPoint = GetModuleEntryPoint(moduleBase);
         info.path = GetModulePath(moduleBase);
-        
-        // 浠庤矾寰勬彁鍙栨ā鍧楀悕
+
         size_t lastSlash = info.path.find_last_of("\\/");
-        info.name = (lastSlash != std::string::npos) ? 
+        info.name = (lastSlash != std::string::npos) ?
                     info.path.substr(lastSlash + 1) : info.path;
-        
-        // 妫€娴嬫槸鍚﹀姞澹?
+
         info.isPacked = IsPacked(moduleBase, info.packerId);
-        
+
     } catch (const std::exception& e) {
         Logger::Error("Failed to analyze module: {}", e.what());
         throw;
     }
-    
+
     return info;
 }
 
@@ -1122,72 +805,19 @@ std::optional<uint64_t> DumpManager::DetectOEP(uint64_t moduleBase, const std::s
         throw MCPException("Failed to pause debugger before OEP detection");
     }
 
-    Logger::Debug("Detecting OEP for module at {} using strategy: {}",
-                  StringUtils::FormatAddress(moduleBase),
-                  strategy);
-    std::string packerId;
-    const bool isPacked = IsPacked(moduleBase, packerId);
-    const uint64_t entryPoint = GetModuleEntryPoint(moduleBase);
+    (void)strategy; // only code_analysis is implemented
 
-    if (strategy == "entropy") {
-        auto result = DetectOEPByEntropy(moduleBase);
-        if (!result.has_value() && isPacked) {
-            result = DetectOEPByPattern(moduleBase);
-        }
-        if (result.has_value()) {
-            Logger::Info("OEP detected by entropy: {}", StringUtils::FormatAddress(result.value()));
-        }
-        return result;
+    Logger::Debug("Detecting OEP for module at {}",
+                  StringUtils::FormatAddress(moduleBase));
+
+    auto result = DetectOEPByPattern(moduleBase);
+    if (result.has_value()) {
+        Logger::Info("OEP detected: {}", StringUtils::FormatAddress(result.value()));
+    } else {
+        Logger::Warning("OEP detection failed for module at {}",
+                        StringUtils::FormatAddress(moduleBase));
     }
-
-    if (strategy == "code_analysis") {
-        auto result = DetectOEPByPattern(moduleBase);
-        if (!result.has_value() && isPacked) {
-            result = DetectOEPByExecution(moduleBase);
-        }
-        if (result.has_value()) {
-            Logger::Info("OEP detected by code analysis: {}", StringUtils::FormatAddress(result.value()));
-        }
-        return result;
-    }
-
-    if (strategy == "api_calls") {
-        // TODO: Implement API-call based OEP detection
-        Logger::Warning("API calls strategy not yet implemented");
-        return std::nullopt;
-    }
-
-    if (strategy == "tls") {
-        // TODO: Implement TLS callback based OEP detection
-        Logger::Warning("TLS strategy not yet implemented");
-        return std::nullopt;
-    }
-
-    if (strategy == "entrypoint") {
-        if (isPacked) {
-            auto unpackedCandidate = DetectOEPByPattern(moduleBase);
-            if (unpackedCandidate.has_value() && unpackedCandidate.value() != entryPoint) {
-                Logger::Info(
-                    "Packed module '{}' OEP resolved from transfer pattern: {}",
-                    packerId,
-                    StringUtils::FormatAddress(unpackedCandidate.value())
-                );
-                return unpackedCandidate;
-            }
-        }
-
-        if (entryPoint != 0) {
-            Logger::Info("Using declared entry point as OEP: {}",
-                         StringUtils::FormatAddress(entryPoint));
-            return entryPoint;
-        }
-
-        Logger::Warning("Failed to get module entry point");
-        return std::nullopt;
-    }
-
-    Logger::Error("Unknown OEP detection strategy: {}", strategy);
-    return std::nullopt;
+    return result;
 }
 
 std::vector<MemoryRegionDump> DumpManager::GetDumpableRegions(uint64_t moduleBase) {
@@ -1230,205 +860,6 @@ std::vector<MemoryRegionDump> DumpManager::GetDumpableRegions(uint64_t moduleBas
     return regions;
 }
 
-bool DumpManager::FixImportTable(uint64_t moduleBase, std::vector<uint8_t>& buffer) {
-    try {
-        if (buffer.size() < sizeof(IMAGE_DOS_HEADER)) {
-            return false;
-        }
-
-        auto* dumpDosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(buffer.data());
-        if (dumpDosHeader->e_magic != IMAGE_DOS_SIGNATURE) {
-            return false;
-        }
-
-        if (buffer.size() < dumpDosHeader->e_lfanew + sizeof(IMAGE_NT_HEADERS)) {
-            return false;
-        }
-
-        auto* dumpNtHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(buffer.data() + dumpDosHeader->e_lfanew);
-        if (dumpNtHeaders->Signature != IMAGE_NT_SIGNATURE) {
-            return false;
-        }
-
-        const std::string modulePath = GetModulePath(moduleBase);
-        if (modulePath.empty()) {
-            Logger::Warning("Cannot fix imports: module path is empty for {}",
-                            StringUtils::FormatAddress(moduleBase));
-            return false;
-        }
-
-        std::ifstream input(ToFilesystemPath(modulePath), std::ios::binary | std::ios::ate);
-        if (!input) {
-            Logger::Warning("Cannot fix imports: failed to open original file {}", modulePath);
-            return false;
-        }
-
-        const std::streamsize fileSize = input.tellg();
-        if (fileSize <= 0) {
-            Logger::Warning("Cannot fix imports: original file {} is empty", modulePath);
-            return false;
-        }
-        input.seekg(0, std::ios::beg);
-
-        std::vector<uint8_t> originalFile(static_cast<size_t>(fileSize));
-        if (!input.read(reinterpret_cast<char*>(originalFile.data()), fileSize)) {
-            Logger::Warning("Cannot fix imports: failed to read original file {}", modulePath);
-            return false;
-        }
-
-        if (!ValidatePEHeader(originalFile)) {
-            Logger::Warning("Cannot fix imports: original file PE header is invalid ({})", modulePath);
-            return false;
-        }
-
-        auto* originalDosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(originalFile.data());
-        auto* originalNtHeaders = reinterpret_cast<const IMAGE_NT_HEADERS*>(
-            originalFile.data() + originalDosHeader->e_lfanew
-        );
-
-        const WORD dumpSectionCount = dumpNtHeaders->FileHeader.NumberOfSections;
-        const WORD originalSectionCount = originalNtHeaders->FileHeader.NumberOfSections;
-        if (dumpSectionCount == 0 || originalSectionCount == 0) {
-            Logger::Warning("Cannot fix imports: missing section headers");
-            return false;
-        }
-
-        auto* dumpSections = reinterpret_cast<IMAGE_SECTION_HEADER*>(
-            reinterpret_cast<uint8_t*>(dumpNtHeaders) + sizeof(IMAGE_NT_HEADERS)
-        );
-        auto* originalSections = reinterpret_cast<const IMAGE_SECTION_HEADER*>(
-            reinterpret_cast<const uint8_t*>(originalNtHeaders) + sizeof(IMAGE_NT_HEADERS)
-        );
-
-        // Keep dump section layout (raw offsets/sizes) intact.
-        // Only restore metadata fields that are safe for import reconstruction.
-        const WORD copySectionCount = std::min(dumpSectionCount, originalSectionCount);
-        for (WORD i = 0; i < copySectionCount; ++i) {
-            std::memcpy(dumpSections[i].Name, originalSections[i].Name, IMAGE_SIZEOF_SHORT_NAME);
-            dumpSections[i].Characteristics = originalSections[i].Characteristics;
-        }
-
-        dumpNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT] =
-            originalNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-        dumpNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT] =
-            originalNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT];
-
-        const auto findSectionByRva = [](const IMAGE_SECTION_HEADER* sections, WORD count, uint32_t rva)
-            -> std::optional<WORD> {
-            for (WORD i = 0; i < count; ++i) {
-                const uint32_t sectionStart = sections[i].VirtualAddress;
-                const uint32_t sectionSpan = std::max(sections[i].Misc.VirtualSize, sections[i].SizeOfRawData);
-                if (sectionSpan == 0) {
-                    continue;
-                }
-
-                if (rva >= sectionStart && rva < sectionStart + sectionSpan) {
-                    return i;
-                }
-            }
-            return std::nullopt;
-        };
-
-        const auto copySectionFromOriginal = [&](WORD sectionIndex, const char* reason) -> bool {
-            const IMAGE_SECTION_HEADER& sec = originalSections[sectionIndex];
-            if (sec.SizeOfRawData == 0) {
-                return false;
-            }
-
-            const size_t srcOffset = static_cast<size_t>(sec.PointerToRawData);
-            const size_t dstOffset = static_cast<size_t>(sec.VirtualAddress);
-            if (srcOffset >= originalFile.size() || dstOffset >= buffer.size()) {
-                return false;
-            }
-
-            const size_t copySize = std::min(
-                static_cast<size_t>(sec.SizeOfRawData),
-                std::min(originalFile.size() - srcOffset, buffer.size() - dstOffset)
-            );
-            if (copySize == 0) {
-                return false;
-            }
-
-            std::memcpy(buffer.data() + dstOffset, originalFile.data() + srcOffset, copySize);
-
-            char sectionName[9] = {0};
-            std::memcpy(sectionName, sec.Name, 8);
-            Logger::Info("Restored section '{}' ({} bytes) from original file for {}",
-                         sectionName, copySize, reason);
-            return true;
-        };
-
-        bool restored = false;
-        const IMAGE_DATA_DIRECTORY& importDir =
-            originalNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-        if (importDir.VirtualAddress != 0) {
-            auto importSection = findSectionByRva(originalSections, originalSectionCount, importDir.VirtualAddress);
-            if (importSection.has_value()) {
-                restored = copySectionFromOriginal(importSection.value(), "import directory");
-            }
-        }
-
-        const IMAGE_DATA_DIRECTORY& iatDir =
-            originalNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT];
-        if (iatDir.VirtualAddress != 0) {
-            auto iatSection = findSectionByRva(originalSections, originalSectionCount, iatDir.VirtualAddress);
-            if (iatSection.has_value()) {
-                restored = copySectionFromOriginal(iatSection.value(), "iat directory") || restored;
-            }
-        }
-
-        if (!restored) {
-            for (WORD i = 0; i < originalSectionCount; ++i) {
-                char sectionName[9] = {0};
-                std::memcpy(sectionName, originalSections[i].Name, 8);
-                std::string nameLower = ToLowerAscii(sectionName);
-                const bool nameLooksImportRelated =
-                    nameLower.find("idata") != std::string::npos ||
-                    nameLower.find("rdata") != std::string::npos ||
-                    nameLower.find("data") != std::string::npos ||
-                    nameLower.find("imp") != std::string::npos;
-
-                const bool readable =
-                    (originalSections[i].Characteristics & IMAGE_SCN_MEM_READ) != 0;
-                const bool nonExecutable =
-                    (originalSections[i].Characteristics & IMAGE_SCN_MEM_EXECUTE) == 0;
-
-                if (nameLooksImportRelated ||
-                    (readable && nonExecutable && originalSections[i].SizeOfRawData != 0)) {
-                    restored = copySectionFromOriginal(i, "fallback import section") || restored;
-                }
-            }
-        }
-
-        if (!restored) {
-            Logger::Warning("Import table fallback could not restore import-related sections");
-            return false;
-        }
-
-        Logger::Info("Import table fix completed using original file fallback");
-        return true;
-        
-    } catch (const std::exception& e) {
-        Logger::Error("Failed to fix import table: {}", e.what());
-        return false;
-    }
-}
-
-bool DumpManager::FixRelocations(uint64_t moduleBase, uint64_t preferredBase, 
-                                 std::vector<uint8_t>& buffer) {
-    try {
-        // TODO: 瀹炵幇閲嶅畾浣嶄慨澶?
-        // 濡傛灉妯″潡琚噸瀹氫綅浜?闇€瑕佽皟鏁撮噸瀹氫綅琛?
-        
-        Logger::Info("Relocation fix completed");
-        return true;
-        
-    } catch (const std::exception& e) {
-        Logger::Error("Failed to fix relocations: {}", e.what());
-        return false;
-    }
-}
-
 bool DumpManager::RebuildPEHeaders(uint64_t moduleBase, std::vector<uint8_t>& buffer,
                                    std::optional<uint32_t> newEP) {
     try {
@@ -1458,8 +889,13 @@ bool DumpManager::RebuildPEHeaders(uint64_t moduleBase, std::vector<uint8_t>& bu
         }
         
         // 淇ImageBase
-        ntHeaders->OptionalHeader.ImageBase = moduleBase;
-        
+        // Use PE-standard default ImageBase instead of ASLR runtime address
+#ifdef XDBG_ARCH_X64
+        ntHeaders->OptionalHeader.ImageBase = 0x0000000140000000ULL;
+#else
+        ntHeaders->OptionalHeader.ImageBase = 0x00400000UL;
+#endif
+
         // 瀵归綈鑺?
         AlignPESections(buffer);
         
@@ -1468,24 +904,6 @@ bool DumpManager::RebuildPEHeaders(uint64_t moduleBase, std::vector<uint8_t>& bu
         
     } catch (const std::exception& e) {
         Logger::Error("Failed to rebuild PE headers: {}", e.what());
-        return false;
-    }
-}
-
-bool DumpManager::ScyllaRebuildImports(uint64_t moduleBase, std::vector<uint8_t>& buffer) {
-    try {
-        // TODO: 瀹炵幇Scylla椋庢牸鐨処AT閲嶅缓
-        // 杩欐槸涓€涓鏉傜殑杩囩▼,闇€瑕?
-        // 1. 鎵弿IAT鍖哄煙
-        // 2. 璇嗗埆API鍦板潃
-        // 3. 鍙嶆煡妯″潡鍜屽嚱鏁板悕
-        // 4. 閲嶅缓瀵煎叆琛?
-        
-        Logger::Info("Scylla import rebuild attempted");
-        return false; // 鏆傛湭瀹炵幇
-        
-    } catch (const std::exception& e) {
-        Logger::Error("Scylla import rebuild failed: {}", e.what());
         return false;
     }
 }
@@ -1680,12 +1098,6 @@ std::string DumpManager::GetModulePath(uint64_t moduleBase) {
         return StringUtils::FixUtf8Mojibake(std::string(path));
     }
     return "";
-}
-
-std::optional<uint64_t> DumpManager::DetectOEPByEntropy(uint64_t moduleBase) {
-    // TODO: 瀹炵幇鍩轰簬鐔靛€肩殑OEP妫€娴?
-    // 鍘熺悊: 鍔犲３鍚庣殑浠ｇ爜鐔靛€艰緝楂?鎵惧埌鐔靛€肩獊鍙樼偣
-    return std::nullopt;
 }
 
 std::optional<uint64_t> DumpManager::DetectOEPByPattern(uint64_t moduleBase) {
@@ -1890,13 +1302,6 @@ std::optional<uint64_t> DumpManager::DetectOEPByPattern(uint64_t moduleBase) {
     return std::nullopt;
 }
 
-std::optional<uint64_t> DumpManager::DetectOEPByExecution(uint64_t moduleBase) {
-    // TODO: 瀹炵幇鍩轰簬鎵ц杩借釜鐨凮EP妫€娴?
-    // 鍘熺悊: 鍗曟鎵ц,妫€娴嬩綍鏃惰烦杞埌鍘熷浠ｇ爜娈?
-    // 杩欓渶瑕佷笌璋冭瘯鍣ㄦ繁搴﹂泦鎴?
-    return std::nullopt;
-}
-
 bool DumpManager::FixPEChecksum(std::vector<uint8_t>& buffer) {
     try {
         if (buffer.size() < sizeof(IMAGE_DOS_HEADER)) {
@@ -1983,13 +1388,5 @@ bool DumpManager::AlignPESections(std::vector<uint8_t>& buffer) {
     }
 }
 
-bool DumpManager::RemoveCodeSection(std::vector<uint8_t>& buffer, const std::string& sectionName) {
-    // TODO: 瀹炵幇鑺傚垹闄ゅ姛鑳?
-    // 鐢ㄤ簬绉婚櫎澹虫坊鍔犵殑鑺?
-    return false;
-}
-
 } // namespace MCP
-
-
 

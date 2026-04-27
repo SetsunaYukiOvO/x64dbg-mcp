@@ -123,8 +123,31 @@ std::vector<MemorySearchResult> MemoryManager::Search(
     std::vector<uint8_t> patternBytes;
     std::vector<bool> mask;
     
-    // 简单的模式解析（如 "48 83 EC ?? 48"）
+    // Parse pattern — supports both spaced ("4D 5A 90 00") and continuous ("4D5A9000") hex,
+    // as well as wildcards ("48 83 EC ?? 48" or "4883EC??48").
     std::vector<std::string> tokens = StringUtils::Split(pattern, ' ');
+
+    // If pattern has no spaces and looks like continuous hex (with optional ?? wildcards),
+    // split it into 2-char byte tokens.
+    if (tokens.size() == 1 && tokens[0].size() > 2) {
+        std::string raw = StringUtils::Trim(tokens[0]);
+        if (raw.size() % 2 == 0) {
+            bool looksLikeContinuousHex = true;
+            for (size_t i = 0; i < raw.size(); i += 2) {
+                char a = raw[i], b = raw[i + 1];
+                bool byteOk = (a == '?' && b == '?') ||
+                              (std::isxdigit(a) && std::isxdigit(b));
+                if (!byteOk) { looksLikeContinuousHex = false; break; }
+            }
+            if (looksLikeContinuousHex) {
+                tokens.clear();
+                for (size_t i = 0; i < raw.size(); i += 2) {
+                    tokens.push_back(raw.substr(i, 2));
+                }
+            }
+        }
+    }
+
     for (const auto& token : tokens) {
         std::string cleaned = StringUtils::Trim(token);
         if (cleaned.empty()) continue;

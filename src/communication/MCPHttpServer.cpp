@@ -725,10 +725,10 @@ bool MCPHttpServer::ParseJsonRpcRequest(const std::string& rawJson,
 std::string MCPHttpServer::HandleMCPMethod(const std::string& method, const std::string& requestId, const std::string& body) {
     if (method == "initialize") {
         Logger::Info("Handling initialize request");
-        return "{\"jsonrpc\":\"2.0\",\"id\":" + requestId + 
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + requestId +
                ",\"result\":{\"protocolVersion\":\"2024-11-05\","
-               "\"capabilities\":{\"tools\":{}},"
-               "\"serverInfo\":{\"name\":\"x64dbg-mcp\",\"version\":\"1.0.3\"}}}";
+               "\"capabilities\":{\"tools\":{},\"resources\":{},\"prompts\":{}},"
+               "\"serverInfo\":{\"name\":\"x64dbg-mcp\",\"version\":\"1.0.4\"}}}";
     }
     else if (method == "notifications/initialized") {
         // 杩欐槸瀹㈡埛绔彂鐨勯€氱煡锛屼笉闇€瑕佸搷搴?
@@ -1193,12 +1193,13 @@ MCPHttpServer::MCPToolCallResult MCPHttpServer::CallMCPTool(const std::string& t
         }
         
         // 杩斿洖鏍煎紡鍖栫殑缁撴灉
+        result.contentText = response.result.dump(2);  // Pretty output
         result.success = true;
-        result.contentText = response.result.dump(2);  // 缇庡寲杈撳嚭
         return result;
         
     } catch (const std::exception& e) {
         Logger::Error("Exception calling tool: {}", e.what());
+        result.success = false;
         result.errorCode = -32603;
         result.errorMessage = std::string("Internal error: ") + e.what();
         return result;

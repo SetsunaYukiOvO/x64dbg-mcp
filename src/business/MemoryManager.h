@@ -121,8 +121,8 @@ private:
                      const std::vector<bool>& mask);
     std::string ProtectionToString(uint32_t protect);
     
-    static constexpr size_t MAX_READ_SIZE = 16 * 1024 * 1024;  // 16 MB
-    static constexpr size_t MAX_WRITE_SIZE = 16 * 1024 * 1024;
+    static constexpr size_t MAX_READ_SIZE = 128 * 1024 * 1024;  // 128 MB
+    static constexpr size_t MAX_WRITE_SIZE = 128 * 1024 * 1024;
 };
 
 } // namespace MCP

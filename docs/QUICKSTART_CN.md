@@ -171,10 +171,18 @@ init_response = client.call("initialize", {
 # 发送 initialized 通知
 client.call("notifications/initialized")
 
-# 列出可用工具
+# 列出可用工具、资源和提示词
 tools = client.call("tools/list")
+resources = client.call("resources/list")
+resource_templates = client.call("resources/templates/list")
+prompts = client.call("prompts/list")
 print(tools)
+print(resources)
+print(resource_templates)
+print(prompts)
 ```
+
+说明：Cursor 等 MCP 客户端通常会根据 `initialize` 响应里的 capabilities 来显示 Tools、Resources、Prompts 分类。如果你刚升级插件但界面里仍未显示新分类，请重载窗口或重新添加该 MCP server 以刷新握手结果。
 
 ## 常用操作
 
@@ -221,7 +229,7 @@ instructions = response["result"]["instructions"]
 
 ```json
 {
-  "version": "1.0.3",
+  "version": "1.0.4",
   "server": {
     "address": "127.0.0.1",
     "port": 3000

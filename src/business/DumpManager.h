@@ -11,14 +11,11 @@ namespace MCP {
  * @brief Dump选项
  */
 struct DumpOptions {
-    bool fixImports = true;         // 修复导入表
-    bool fixRelocations = false;    // 修复重定位
     bool fixOEP = true;             // 修复入口点 (OEP)
     bool removeIntegrityCheck = true; // 移除PE校验和
     bool rebuildPE = true;          // 重建PE头
     bool autoDetectOEP = false;     // 自动检测OEP
     bool dumpFullImage = false;     // dump完整镜像(包括未映射部分)
-    // Force a specific absolute OEP when provided.
     std::optional<uint64_t> forcedOEP;
 };
 
@@ -29,8 +26,6 @@ struct DumpProgress {
     enum class Stage {
         Preparing,              // 准备阶段
         ReadingMemory,          // 读取内存
-        FixingImports,          // 修复导入表
-        FixingRelocations,      // 修复重定位
         FixingPEHeaders,        // 修复PE头
         Writing,                // 写入文件
         Completed,              // 完成
@@ -122,23 +117,6 @@ public:
         const std::string& outputPath,
         bool asRawBinary = false
     );
-    
-    /**
-     * @brief 自动脱壳dump
-     * @param moduleNameOrAddress 目标模块
-     * @param outputPath 输出路径
-     * @param maxIterations 最大迭代次数(用于多层壳)
-     * @param progressCallback 进度回调
-     * @return Dump结果
-     */
-    DumpResult AutoUnpackAndDump(
-        const std::string& moduleNameOrAddress,
-        const std::string& outputPath,
-        int maxIterations = 10,
-        const std::string& oepStrategy = "code_analysis",
-        ProgressCallback progressCallback = nullptr
-    );
-    
     /**
      * @brief 分析模块是否加壳
      * @param moduleNameOrAddress 模块名或基址
@@ -160,25 +138,6 @@ public:
      * @return 内存区域列表
      */
     std::vector<MemoryRegionDump> GetDumpableRegions(uint64_t moduleBase = 0);
-    
-    /**
-     * @brief 修复PE导入表
-     * @param moduleBase 模块基址
-     * @param buffer PE文件缓冲区(会被修改)
-     * @return 是否成功
-     */
-    bool FixImportTable(uint64_t moduleBase, std::vector<uint8_t>& buffer);
-    
-    /**
-     * @brief 修复PE重定位表
-     * @param moduleBase 当前基址
-     * @param preferredBase 首选基址
-     * @param buffer PE文件缓冲区(会被修改)
-     * @return 是否成功
-     */
-    bool FixRelocations(uint64_t moduleBase, uint64_t preferredBase, 
-                       std::vector<uint8_t>& buffer);
-    
     /**
      * @brief 重建PE头
      * @param moduleBase 模块基址
@@ -188,15 +147,6 @@ public:
      */
     bool RebuildPEHeaders(uint64_t moduleBase, std::vector<uint8_t>& buffer,
                          std::optional<uint32_t> newEP = std::nullopt);
-    
-    /**
-     * @brief 从内存重建导入表(Scylla风格)
-     * @param moduleBase 模块基址
-     * @param buffer PE文件缓冲区
-     * @return 是否成功
-     */
-    bool ScyllaRebuildImports(uint64_t moduleBase, std::vector<uint8_t>& buffer);
-    
     /**
      * @brief 设置OEP检测策略
      * @param strategy 策略函数: (moduleBase) -> OEP地址
@@ -226,15 +176,10 @@ private:
     std::string GetModulePath(uint64_t moduleBase);
     
     // OEP检测辅助
-    std::optional<uint64_t> DetectOEPByEntropy(uint64_t moduleBase);
     std::optional<uint64_t> DetectOEPByPattern(uint64_t moduleBase);
-    std::optional<uint64_t> DetectOEPByExecution(uint64_t moduleBase);
-    
     // PE修复辅助
     bool FixPEChecksum(std::vector<uint8_t>& buffer);
     bool AlignPESections(std::vector<uint8_t>& buffer);
-    bool RemoveCodeSection(std::vector<uint8_t>& buffer, const std::string& sectionName);
-    
     // 用户自定义OEP检测策略
     std::function<std::optional<uint64_t>(uint64_t)> m_oepDetectionStrategy;
 };

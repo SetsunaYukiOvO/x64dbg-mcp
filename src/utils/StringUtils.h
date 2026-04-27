@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <cctype>
+#include <optional>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -168,27 +169,55 @@ inline std::string FormatAddress(uint64_t address, bool prefix = true) {
 }
 
 /**
- * @brief 解析地址字符串（支持十六进制和十进制）
+ * @brief Try resolving an address string via x64dbg's expression evaluator (DbgEval).
+ * Handles symbol names, register names, and expressions.
+ * Returns std::nullopt if DbgEval is unavailable or the expression fails.
+ */
+/**
+ * @brief Callback type for resolving expressions (symbol names, register names, etc.)
+ * to addresses. Set by the plugin at init time to wire in DbgEval.
+ */
+using AddressResolverFn = std::optional<uint64_t>(*)(const std::string&);
+inline AddressResolverFn g_addressResolver = nullptr;
+
+inline void SetAddressResolver(AddressResolverFn fn) { g_addressResolver = fn; }
+
+/**
+ * @brief Parse address string. Supports hex (0x...), decimal, and — when a
+ * resolver is registered — symbol names, register names, and x64dbg expressions.
  */
 inline uint64_t ParseAddress(const std::string& str) {
     std::string cleanStr = Trim(str);
-    
+
     if (cleanStr.empty()) {
         throw std::invalid_argument("Empty address string");
     }
-    
-    // 检查是否为十六进制
-    int base = 10;
-    if (StartsWith(cleanStr, "0x") || StartsWith(cleanStr, "0X")) {
-        base = 16;
-        cleanStr = cleanStr.substr(2);
-    } else if (std::all_of(cleanStr.begin(), cleanStr.end(),
-                           [](char c) { return std::isxdigit(c); })) {
-        // 如果全是十六进制字符，也尝试按十六进制解析
-        base = 16;
+
+    // Fast path: try numeric parsing first
+    try {
+        int base = 10;
+        std::string numStr = cleanStr;
+        if (StartsWith(numStr, "0x") || StartsWith(numStr, "0X")) {
+            base = 16;
+            numStr = numStr.substr(2);
+        } else if (std::all_of(numStr.begin(), numStr.end(),
+                               [](char c) { return std::isxdigit(c); })) {
+            base = 16;
+        }
+        return std::stoull(numStr, nullptr, base);
+    } catch (...) {
+        // Not a plain number — fall through to resolver
     }
-    
-    return std::stoull(cleanStr, nullptr, base);
+
+    // Fallback: resolve via registered callback (DbgEval when running inside x64dbg)
+    if (g_addressResolver) {
+        auto resolved = g_addressResolver(cleanStr);
+        if (resolved.has_value()) {
+            return resolved.value();
+        }
+    }
+
+    throw std::invalid_argument("Cannot resolve address: " + cleanStr);
 }
 
 /**

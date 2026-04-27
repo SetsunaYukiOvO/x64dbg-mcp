@@ -10,6 +10,30 @@
 
 namespace MCP {
 
+namespace {
+
+std::string ToSafeAscii(const std::vector<uint8_t>& data) {
+    std::string result;
+    result.reserve(data.size() * 4);
+
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    for (uint8_t byte : data) {
+        if (byte >= 0x20 && byte <= 0x7E) {
+            result.push_back(static_cast<char>(byte));
+            continue;
+        }
+
+        result.push_back('\\');
+        result.push_back('x');
+        result.push_back(kHex[(byte >> 4) & 0x0F]);
+        result.push_back(kHex[byte & 0x0F]);
+    }
+
+    return result;
+}
+
+} // namespace
+
 void MemoryHandler::RegisterMethods() {
     auto& dispatcher = MethodDispatcher::Instance();
     
@@ -278,7 +302,7 @@ std::string MemoryHandler::EncodeData(const std::vector<uint8_t>& data, const st
     } else if (encoding == "base64") {
         return StringUtils::ToBase64(data);
     } else if (encoding == "ascii") {
-        return std::string(data.begin(), data.end());
+        return ToSafeAscii(data);
     } else {
         throw InvalidParamsException("Unknown encoding: " + encoding);
     }

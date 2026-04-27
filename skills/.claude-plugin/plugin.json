@@ -1,0 +1,24 @@
+{
+  "name": "x64dbg-re",
+  "version": "1.0.0",
+  "description": "Reverse engineering workflow automation for x64dbg debugger via MCP protocol",
+  "author": {
+    "name": "SetsunaYukiOvO",
+    "url": "https://github.com/SetsunaYukiOvO"
+  },
+  "homepage": "https://github.com/SetsunaYukiOvO/x64dbg-mcp",
+  "repository": "https://github.com/SetsunaYukiOvO/x64dbg-mcp",
+  "license": "MIT",
+  "keywords": [
+    "x64dbg",
+    "reverse-engineering",
+    "debugging",
+    "binary-analysis",
+    "mcp",
+    "malware-analysis",
+    "unpacking",
+    "vulnerability-research",
+    "disassembly",
+    "windows"
+  ]
+}
