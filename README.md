@@ -9,14 +9,14 @@ A Model Context Protocol (MCP) server implementation for x64dbg and x32dbg, enab
 ## Features
 
 - **Full MCP Specification Compliance**: Implements all three core MCP building blocks
-  - **Tools (69)**: AI-invokable debugging functions
+  - **Tools (78)**: AI-invokable debugging functions
   - **Resources (15)**: Application-controlled context data sources
   - **Prompts (10)**: User-guided debugging workflow templates
   
 - **JSON-RPC 2.0 Protocol**: Standard, language-agnostic interface
 - **HTTP + SSE Communication**: Modern web-based integration via Server-Sent Events
 
-- **Tools - AI-Controlled Debugging (69 functions)**: 
+- **Tools - AI-Controlled Debugging (78 functions)**: 
   - Execution control (run, pause, step, run_to)
   - Memory read/write/search/allocate
   - Register access (50+ registers including GPR, SSE, AVX)
@@ -42,7 +42,38 @@ A Model Context Protocol (MCP) server implementation for x64dbg and x32dbg, enab
 - **Security**: Permission-based access control
 - **Extensible**: Plugin architecture for custom methods, resources, and prompts
 
-## What's New in v1.0.3
+## What's New in v1.0.4
+
+- **12 New Tools** (66 → 78 total)
+  - `eval_expression` — evaluate x64dbg expressions (math, symbols, registers, memory dereferences)
+  - `xref_get` — cross-reference analysis (find callers, jump sources, data references)
+  - `function_list` / `function_get` — recognized function enumeration and boundary queries
+  - `module_get_exports` / `module_get_imports` — module import/export table inspection
+  - `assembler_assemble` — assemble instructions to machine code (with optional write-to-memory)
+  - `bookmark_set` / `bookmark_delete` / `bookmark_list` — bookmark management
+  - `patch_list` / `patch_restore` — patch tracking and rollback
+
+- **Address Parsing Enhancement**
+  - All address parameters now accept symbol names (`kernel32.IsDebuggerPresent`), register names (`RIP`, `RSP`), and x64dbg expressions (`rax+rbx*2`, `[rsp+8]`) via DbgEval fallback
+
+- **Memory Search Enhancement**
+  - `memory_search` now accepts both spaced (`4D 5A 90 00`) and continuous (`4D5A9000`) hex patterns, including wildcards (`4883EC??48`)
+
+- **Dump Improvements**
+  - Fixed `ImageBase` in dumped PE (was using ASLR runtime address, now uses standard 0x140000000 / 0x400000)
+  - Removed unreliable auto-unpack, IAT rebuild, and relocation fix stubs
+  - Cleaned up dump tool set to 5 reliable, tested tools
+
+- **Claude Code Plugin**
+  - New `skills/` directory structured as a Claude Code plugin with 11 reverse engineering slash commands
+  - Skill knowledge base with tool reference and RE pattern cheat sheets
+
+- **Optimized MCP Prompts**
+  - All 10 prompt templates rewritten with multi-phase workflows, specific tool names, and structured output formats
+
+## Previous Versions
+
+### v1.0.3
 
 - **Generalized Unpacking (Not UPX-only)**
   - Expanded transfer/OEP recognition patterns (`E9`, `EB`, `FF25`, `push-ret`, `mov-jmp`, `movabs-jmp`)
@@ -210,7 +241,7 @@ Edit `config.json` to customize settings:
 
 ```json
 {
-  "version": "1.0.3",
+  "version": "1.0.4",
   "server": {
     "address": "127.0.0.1",
     "port": 3000

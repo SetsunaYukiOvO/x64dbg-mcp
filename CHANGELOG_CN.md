@@ -5,6 +5,33 @@ x64dbg MCP Server Plugin 的所有重要变更都会记录在此文件中。
 格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)，
 并采用 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
 
+## [1.0.4] - 2026-04-27
+
+### 新增
+- **12 个新 MCP 工具**（66 → 78）：
+  - `eval_expression` — x64dbg 表达式求值
+  - `xref_get` — 交叉引用分析
+  - `function_list`、`function_get` — 函数边界查询
+  - `module_get_exports`、`module_get_imports` — 导入/导出表查看
+  - `assembler_assemble` — 指令到字节码汇编
+  - `bookmark_set`、`bookmark_delete`、`bookmark_list` — 书签管理
+  - `patch_list`、`patch_restore` — 补丁追踪与回滚
+- 地址参数支持符号名、寄存器名和 x64dbg 表达式（DbgEval 回退）
+- `memory_search` 支持连续 hex 格式（如 `4D5A9000`）
+- Claude Code 插件（`skills/`）含 11 个逆向工程斜杠命令
+- 逆向工程知识库（工具速查表、常用模式参考）
+
+### 变更
+- 10 个 MCP 提示词模板重写为多阶段结构化工作流
+- `dump_module` 的 ImageBase 使用 PE 标准默认值而非 ASLR 运行时地址
+- `dump_detect_oep` 简化为单一可靠的模式匹配策略
+
+### 移除
+- `dump_auto_unpack` — 不可靠的自动脱壳管线
+- `dump_fix_imports` — 需要不实际的字节数组参数
+- `dump_rebuild_pe` — 需要不实际的字节数组参数
+- 清除死代码：`FixImportTable`、`ScyllaRebuildImports`、`FixRelocations`、`DetectOEPByEntropy`、`DetectOEPByExecution`、`RemoveCodeSection` 等空壳函数
+
 ## [1.0.3] - 2026-03-04
 
 ### 修复

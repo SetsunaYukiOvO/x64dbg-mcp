@@ -35,6 +35,8 @@ public:
      * @brief 获取主模块信息
      */
     static json GetMain(const json& params);
+    static json GetExports(const json& params);
+    static json GetImports(const json& params);
 };
 
 } // namespace MCP

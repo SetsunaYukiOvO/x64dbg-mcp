@@ -661,20 +661,16 @@ void MCPToolRegistry::RegisterDefaultTools() {
     // 14. Dump & Unpacking Tools
     RegisterTool({
         "dump_module",
-        "Dump module to file with PE reconstruction",
+        "Dump module to file with PE header reconstruction and optional OEP override",
         "dump.module",
         {
             {"module", "string", "Module name or base address", true, nullptr, nullptr},
             {"output_path", "string", "Output file path", true, nullptr, nullptr},
-            {"fix_imports", "boolean", "Fix import table", false, true, nullptr},
-            {"fix_relocations", "boolean", "Fix relocations", false, false, nullptr},
-            {"fix_oep", "boolean", "Fix entry point", false, true, nullptr},
+            {"oep", "string", "Force this address as the new entry point (hex)", false, nullptr, nullptr},
+            {"rebuild_pe", "boolean", "Rebuild PE headers and align sections", false, true, nullptr},
             {"remove_integrity_check", "boolean", "Clear PE checksum", false, true, nullptr},
-            {"rebuild_pe", "boolean", "Rebuild PE headers", false, true, nullptr},
-            {"auto_detect_oep", "boolean", "Auto-detect OEP", false, false, nullptr},
-            {"dump_full_image", "boolean", "Dump full image including non-committed pages", false, false, nullptr},
-            {"options", "object", "Optional nested options object (legacy compatibility)", false, nullptr, nullptr},
-            {"oep", "string", "Original Entry Point (optional)", false, nullptr, nullptr}
+            {"auto_detect_oep", "boolean", "Try to auto-detect OEP via pattern analysis", false, false, nullptr},
+            {"dump_full_image", "boolean", "Dump full image including non-committed pages", false, false, nullptr}
         }
     });
     
@@ -689,20 +685,7 @@ void MCPToolRegistry::RegisterDefaultTools() {
             {"as_raw_binary", "boolean", "Store bytes as-is without PE rebuild", false, false, nullptr}
         }
     });
-    
-    RegisterTool({
-        "dump_auto_unpack",
-        "Automatically unpack and dump packed executable",
-        "dump.auto_unpack",
-        {
-            {"module", "string", "Module name or base address", true, nullptr, nullptr},
-            {"output_path", "string", "Output file path", true, nullptr, nullptr},
-            {"max_iterations", "integer", "Maximum unpacking iterations", false, 10, nullptr},
-            {"strategy", "string", "Unpacking strategy (entropy, code_analysis, api_calls, tls, entrypoint)", false, "code_analysis",
-             json::array({"entropy", "code_analysis", "api_calls", "tls", "entrypoint"})}
-        }
-    });
-    
+
     RegisterTool({
         "dump_analyze_module",
         "Analyze module and detect packer",
@@ -714,12 +697,10 @@ void MCPToolRegistry::RegisterDefaultTools() {
     
     RegisterTool({
         "dump_detect_oep",
-        "Detect Original Entry Point (OEP)",
+        "Detect Original Entry Point (OEP) by scanning for unpacker stub transfer patterns",
         "dump.detect_oep",
         {
-            {"module", "string", "Module name or base address", true, nullptr, nullptr},
-            {"strategy", "string", "Detection strategy (entropy, code_analysis, api_calls, tls, entrypoint)", false, "code_analysis",
-             json::array({"entropy", "code_analysis", "api_calls", "tls", "entrypoint"})}
+            {"module", "string", "Module name or base address", true, nullptr, nullptr}
         }
     });
     
@@ -729,30 +710,6 @@ void MCPToolRegistry::RegisterDefaultTools() {
         "dump.get_dumpable_regions",
         {
             {"module_base", "string", "Optional module base address filter", false, nullptr, nullptr}
-        }
-    });
-    
-    RegisterTool({
-        "dump_fix_imports",
-        "Fix import address table (IAT)",
-        "dump.fix_imports",
-        {
-            {"module_base", "string", "Module base address", true, nullptr, nullptr},
-            {"buffer", "array", "PE file data as byte array", true, nullptr, nullptr,
-             json{{"type", "integer"}}},
-            {"use_scylla", "boolean", "Use Scylla algorithm", false, false, nullptr}
-        }
-    });
-    
-    RegisterTool({
-        "dump_rebuild_pe",
-        "Rebuild PE header and sections",
-        "dump.rebuild_pe",
-        {
-            {"module_base", "string", "Module base address", true, nullptr, nullptr},
-            {"buffer", "array", "PE file data as byte array", true, nullptr, nullptr,
-             json{{"type", "integer"}}},
-            {"new_ep", "string", "New entry point RVA (optional)", false, nullptr, nullptr}
         }
     });
     
@@ -811,7 +768,120 @@ void MCPToolRegistry::RegisterDefaultTools() {
             {"snapshot2", "object", "Second snapshot (from context.get_snapshot)", true, nullptr, nullptr}
         }
     });
-    
+
+    // 17. Expression Evaluation
+    RegisterTool({
+        "eval_expression",
+        "Evaluate an x64dbg expression (math, symbols, registers, memory dereferences like [rsp+8])",
+        "eval.expression",
+        {
+            {"expression", "string", "Expression to evaluate (e.g. 'rax+rbx*2', '[rsp+8]', 'kernel32.base')", true, nullptr, nullptr}
+        }
+    });
+
+    // 18. Cross-Reference Analysis
+    RegisterTool({
+        "xref_get",
+        "Get cross-references (callers, jumps, data refs) to an address",
+        "xref.get",
+        {
+            {"address", "string", "Target address to find references to", true, nullptr, nullptr}
+        }
+    });
+
+    // 19. Function Analysis
+    RegisterTool({
+        "function_list",
+        "List all recognized functions in the debuggee",
+        "function.list",
+        {
+            {"module", "string", "Filter by module name (optional)", false, nullptr, nullptr}
+        }
+    });
+
+    RegisterTool({
+        "function_get",
+        "Get function boundaries (start, end, size) at an address",
+        "function.get",
+        {
+            {"address", "string", "Address within the function", true, nullptr, nullptr}
+        }
+    });
+
+    // 20. Module Imports/Exports
+    RegisterTool({
+        "module_get_exports",
+        "List exported functions of a module",
+        "module.get_exports",
+        {
+            {"module", "string", "Module name or base address", true, nullptr, nullptr}
+        }
+    });
+
+    RegisterTool({
+        "module_get_imports",
+        "List imported functions of a module",
+        "module.get_imports",
+        {
+            {"module", "string", "Module name or base address", true, nullptr, nullptr}
+        }
+    });
+
+    // 21. Assembler
+    RegisterTool({
+        "assembler_assemble",
+        "Assemble an instruction to machine code bytes, optionally writing to memory",
+        "assembler.assemble",
+        {
+            {"instruction", "string", "Assembly instruction (e.g. 'nop', 'jmp 0x401000', 'mov eax, 1')", true, nullptr, nullptr},
+            {"address", "string", "Address context for assembly (affects relative offsets)", true, nullptr, nullptr},
+            {"write_to_memory", "boolean", "Write assembled bytes directly to target memory", false, false, nullptr}
+        }
+    });
+
+    // 22. Bookmarks
+    RegisterTool({
+        "bookmark_set",
+        "Set a bookmark at an address",
+        "bookmark.set",
+        {
+            {"address", "string", "Address to bookmark", true, nullptr, nullptr}
+        }
+    });
+
+    RegisterTool({
+        "bookmark_delete",
+        "Delete a bookmark at an address",
+        "bookmark.delete",
+        {
+            {"address", "string", "Address to remove bookmark from", true, nullptr, nullptr}
+        }
+    });
+
+    RegisterTool({
+        "bookmark_list",
+        "List all bookmarks",
+        "bookmark.list",
+        {}
+    });
+
+    // 23. Patch Management
+    RegisterTool({
+        "patch_list",
+        "List all applied patches (byte-level modifications)",
+        "patch.list",
+        {}
+    });
+
+    RegisterTool({
+        "patch_restore",
+        "Restore original bytes at a patched address",
+        "patch.restore",
+        {
+            {"address", "string", "Address to restore original bytes", true, nullptr, nullptr}
+        }
+    });
+
     Logger::Info("Registered {} MCP tools", m_tools.size());
 }
 

@@ -5,6 +5,33 @@ All notable changes to the x64dbg MCP Server Plugin will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-04-27
+
+### Added
+- **12 new MCP tools** (66 → 78 total):
+  - `eval_expression` — x64dbg expression evaluator
+  - `xref_get` — cross-reference analysis
+  - `function_list`, `function_get` — function boundary queries
+  - `module_get_exports`, `module_get_imports` — import/export inspection
+  - `assembler_assemble` — instruction-to-bytes assembler
+  - `bookmark_set`, `bookmark_delete`, `bookmark_list` — bookmark management
+  - `patch_list`, `patch_restore` — patch tracking and rollback
+- DbgEval-backed address parsing: all address params accept symbols, registers, and expressions
+- `memory_search` continuous hex format support (e.g. `4D5A9000`)
+- Claude Code plugin (`skills/`) with 11 reverse engineering slash commands
+- Skill knowledge base with tool reference and RE pattern cheat sheets
+
+### Changed
+- All 10 MCP prompt templates rewritten with multi-phase structured workflows
+- `dump_module` ImageBase now uses standard PE default (0x140000000 / 0x400000) instead of ASLR runtime address
+- `dump_detect_oep` simplified to single reliable pattern-based strategy
+
+### Removed
+- `dump_auto_unpack` — unreliable auto-unpack pipeline
+- `dump_fix_imports` — required impractical byte-array parameter
+- `dump_rebuild_pe` — required impractical byte-array parameter
+- Dead code: `FixImportTable`, `ScyllaRebuildImports`, `FixRelocations`, `DetectOEPByEntropy`, `DetectOEPByExecution`, `RemoveCodeSection` stubs
+
 ## [1.0.3] - 2026-03-04
 
 ### Fixed

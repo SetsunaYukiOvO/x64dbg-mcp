@@ -15,12 +15,9 @@ void DumpHandler::RegisterMethods() {
     
     dispatcher.RegisterMethod("dump.module", DumpModule);
     dispatcher.RegisterMethod("dump.memory_region", DumpMemoryRegion);
-    dispatcher.RegisterMethod("dump.auto_unpack", AutoUnpackAndDump);
     dispatcher.RegisterMethod("dump.analyze_module", AnalyzeModule);
     dispatcher.RegisterMethod("dump.detect_oep", DetectOEP);
     dispatcher.RegisterMethod("dump.get_dumpable_regions", GetDumpableRegions);
-    dispatcher.RegisterMethod("dump.fix_imports", FixImports);
-    dispatcher.RegisterMethod("dump.rebuild_pe", RebuildPE);
 }
 
 nlohmann::json DumpHandler::DumpModule(const nlohmann::json& params) {
@@ -61,8 +58,6 @@ nlohmann::json DumpHandler::DumpModule(const nlohmann::json& params) {
         return defaultValue;
     };
 
-    options.fixImports = readBoolOption("fix_imports", true);
-    options.fixRelocations = readBoolOption("fix_relocations", false);
     options.fixOEP = readBoolOption("fix_oep", true);
     options.removeIntegrityCheck = readBoolOption("remove_integrity_check", true);
     options.rebuildPE = readBoolOption("rebuild_pe", true);
@@ -121,48 +116,6 @@ nlohmann::json DumpHandler::DumpMemoryRegion(const nlohmann::json& params) {
     return DumpResultToJson(result);
 }
 
-nlohmann::json DumpHandler::AutoUnpackAndDump(const nlohmann::json& params) {
-    // 妫€鏌ュ啓鏉冮檺
-    if (!PermissionChecker::Instance().IsMemoryWriteAllowed()) {
-        throw PermissionDeniedException("Auto-unpacking requires write permission");
-    }
-    
-    // 楠岃瘉鍙傛暟
-    if (!params.contains("module")) {
-        throw InvalidParamsException("Missing required parameter: module");
-    }
-    
-    if (!params.contains("output_path")) {
-        throw InvalidParamsException("Missing required parameter: output_path");
-    }
-    
-    std::string module = params["module"].get<std::string>();
-    std::string outputPath = params["output_path"].get<std::string>();
-    int maxIterations = params.value("max_iterations", 10);
-    std::string strategy = params.value("strategy", "code_analysis");
-
-    static const std::set<std::string> validStrategies = {
-        "entropy", "code_analysis", "api_calls", "tls", "entrypoint"
-    };
-    if (validStrategies.find(strategy) == validStrategies.end()) {
-        throw InvalidParamsException(
-            "Invalid strategy '" + strategy + "'. Valid strategies: entropy, code_analysis, api_calls, tls, entrypoint"
-        );
-    }
-    
-    auto& manager = DumpManager::Instance();
-    auto result = manager.AutoUnpackAndDump(module, outputPath, maxIterations, strategy, nullptr);
-    
-    nlohmann::json response = DumpResultToJson(result);
-    
-    // 娣诲姞棰濆鐨勮嚜鍔ㄨ劚澹充俊鎭?
-    if (result.success && result.newEP != 0) {
-        response["detected_oep"] = StringUtils::FormatAddress(result.newEP);
-    }
-    
-    return response;
-}
-
 nlohmann::json DumpHandler::AnalyzeModule(const nlohmann::json& params) {
     std::string module;
     
@@ -193,19 +146,6 @@ nlohmann::json DumpHandler::DetectOEP(const nlohmann::json& params) {
     }
     
     std::string moduleStr = params["module"].get<std::string>();
-    std::string strategy = params.value("strategy", "code_analysis");
-    
-    // 楠岃瘉绛栫暐鍙傛暟
-    static const std::set<std::string> validStrategies = {
-        "entropy", "code_analysis", "api_calls", "tls", "entrypoint"
-    };
-    
-    if (validStrategies.find(strategy) == validStrategies.end()) {
-        throw InvalidParamsException(
-            "Invalid strategy '" + strategy + "'. Valid strategies: entropy, code_analysis, api_calls, tls, entrypoint"
-        );
-    }
-    
     auto& manager = DumpManager::Instance();
     
     // 瑙ｆ瀽妯″潡鍚嶆垨鍦板潃
@@ -215,11 +155,10 @@ nlohmann::json DumpHandler::DetectOEP(const nlohmann::json& params) {
     }
     
     uint64_t moduleBase = moduleBaseOpt.value();
-    auto oepOpt = manager.DetectOEP(moduleBase, strategy);
-    
+    auto oepOpt = manager.DetectOEP(moduleBase);
+
     nlohmann::json result;
     result["detected"] = oepOpt.has_value();
-    result["strategy"] = strategy;
     
     if (oepOpt.has_value()) {
         uint64_t oep = oepOpt.value();
@@ -255,107 +194,6 @@ nlohmann::json DumpHandler::GetDumpableRegions(const nlohmann::json& params) {
     
     return result;
 }
-
-nlohmann::json DumpHandler::FixImports(const nlohmann::json& params) {
-    // 妫€鏌ュ啓鏉冮檺
-    if (!PermissionChecker::Instance().IsMemoryWriteAllowed()) {
-        throw PermissionDeniedException("Fixing imports requires write permission");
-    }
-    
-    // 楠岃瘉鍙傛暟
-    if (!params.contains("module_base")) {
-        throw InvalidParamsException("Missing required parameter: module_base");
-    }
-    
-    if (!params.contains("buffer")) {
-        throw InvalidParamsException("Missing required parameter: buffer");
-    }
-    
-    std::string baseStr = params["module_base"].get<std::string>();
-    uint64_t moduleBase = StringUtils::ParseAddress(baseStr);
-    
-    // 浠嶫SON鏁扮粍杞崲涓哄瓧鑺傚悜閲?
-    std::vector<uint8_t> buffer;
-    for (const auto& byte : params["buffer"]) {
-        buffer.push_back(byte.get<uint8_t>());
-    }
-    
-    bool useScylla = params.value("use_scylla", false);
-    
-    auto& manager = DumpManager::Instance();
-    bool success;
-    
-    if (useScylla) {
-        success = manager.ScyllaRebuildImports(moduleBase, buffer);
-    } else {
-        success = manager.FixImportTable(moduleBase, buffer);
-    }
-    
-    nlohmann::json result;
-    result["success"] = success;
-    
-    if (success) {
-        // 杞崲鍥濲SON鏁扮粍
-        nlohmann::json bufferArray = nlohmann::json::array();
-        for (uint8_t byte : buffer) {
-            bufferArray.push_back(byte);
-        }
-        result["fixed_buffer"] = bufferArray;
-    }
-    
-    return result;
-}
-
-nlohmann::json DumpHandler::RebuildPE(const nlohmann::json& params) {
-    // 妫€鏌ュ啓鏉冮檺
-    if (!PermissionChecker::Instance().IsMemoryWriteAllowed()) {
-        throw PermissionDeniedException("Rebuilding PE requires write permission");
-    }
-    
-    // 楠岃瘉鍙傛暟
-    if (!params.contains("module_base")) {
-        throw InvalidParamsException("Missing required parameter: module_base");
-    }
-    
-    if (!params.contains("buffer")) {
-        throw InvalidParamsException("Missing required parameter: buffer");
-    }
-    
-    std::string baseStr = params["module_base"].get<std::string>();
-    uint64_t moduleBase = StringUtils::ParseAddress(baseStr);
-    
-    // 浠嶫SON鏁扮粍杞崲涓哄瓧鑺傚悜閲?
-    std::vector<uint8_t> buffer;
-    for (const auto& byte : params["buffer"]) {
-        buffer.push_back(byte.get<uint8_t>());
-    }
-    
-    std::optional<uint32_t> newEP;
-    if (params.contains("new_ep")) {
-        std::string epStr = params["new_ep"].get<std::string>();
-        newEP = static_cast<uint32_t>(StringUtils::ParseAddress(epStr));
-    }
-    
-    auto& manager = DumpManager::Instance();
-    bool success = manager.RebuildPEHeaders(moduleBase, buffer, newEP);
-    
-    nlohmann::json result;
-    result["success"] = success;
-    
-    if (success) {
-        // 杞崲鍥濲SON鏁扮粍
-        nlohmann::json bufferArray = nlohmann::json::array();
-        for (uint8_t byte : buffer) {
-            bufferArray.push_back(byte);
-        }
-        result["fixed_buffer"] = bufferArray;
-    }
-    
-    return result;
-}
-
-// ========== 杈呭姪鏂规硶 ==========
-
 nlohmann::json DumpHandler::DumpResultToJson(const DumpResult& result) {
     nlohmann::json json;
     

@@ -9,12 +9,9 @@ namespace MCP {
  * 实现的方法：
  * - dump.module: Dump指定模块到文件
  * - dump.memory_region: Dump指定内存区域
- * - dump.auto_unpack: 自动脱壳dump
  * - dump.analyze_module: 分析模块是否加壳
  * - dump.detect_oep: 检测原始入口点
  * - dump.get_dumpable_regions: 获取可dump的内存区域
- * - dump.fix_imports: 修复导入表
- * - dump.rebuild_pe: 重建PE头
  */
 class DumpHandler {
 public:
@@ -66,22 +63,6 @@ private:
     static nlohmann::json DumpMemoryRegion(const nlohmann::json& params);
     
     /**
-     * @brief 自动脱壳dump
-     * @param params {
-     *   "module": "packed.exe",
-     *   "output_path": "C:\\dump\\unpacked.exe",
-     *   "max_iterations": 10  // 最大迭代次数
-     * }
-     * @return {
-     *   "success": true,
-     *   "file_path": "C:\\dump\\unpacked.exe",
-     *   "iterations": 2,
-     *   "detected_oep": "0x401000"
-     * }
-     */
-    static nlohmann::json AutoUnpackAndDump(const nlohmann::json& params);
-    
-    /**
      * @brief 分析模块
      * @param params {
      *   "module": "ntdll.dll" | "0x7FF12340000"
@@ -129,35 +110,6 @@ private:
      * }
      */
     static nlohmann::json GetDumpableRegions(const nlohmann::json& params);
-    
-    /**
-     * @brief 修复导入表
-     * @param params {
-     *   "module_base": "0x400000",
-     *   "buffer": [0x4D, 0x5A, ...],  // PE文件数据
-     *   "use_scylla": false            // 使用Scylla算法
-     * }
-     * @return {
-     *   "success": true,
-     *   "fixed_buffer": [0x4D, 0x5A, ...]
-     * }
-     */
-    static nlohmann::json FixImports(const nlohmann::json& params);
-    
-    /**
-     * @brief 重建PE头
-     * @param params {
-     *   "module_base": "0x400000",
-     *   "buffer": [0x4D, 0x5A, ...],
-     *   "new_ep": "0x1000"  // 新的入口点RVA(可选)
-     * }
-     * @return {
-     *   "success": true,
-     *   "fixed_buffer": [0x4D, 0x5A, ...]
-     * }
-     */
-    static nlohmann::json RebuildPE(const nlohmann::json& params);
-    
     // 辅助方法
     static nlohmann::json DumpOptionsFromJson(const nlohmann::json& json);
     static nlohmann::json DumpResultToJson(const struct DumpResult& result);

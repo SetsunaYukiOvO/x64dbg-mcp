@@ -101,6 +101,17 @@ bool ResolveModuleByQueryFallback(const std::string& query, Script::Module::Modu
     return false;
 }
 
+bool ResolveModuleInfo(const std::string& nameOrAddr, Script::Module::ModuleInfo& info) {
+    try {
+        duint address = StringUtils::ParseAddress(nameOrAddr);
+        if (Script::Module::InfoFromAddr(address, &info))
+            return true;
+    } catch (...) {}
+    if (Script::Module::InfoFromName(nameOrAddr.c_str(), &info))
+        return true;
+    return ResolveModuleByQueryFallback(nameOrAddr, &info);
+}
+
 } // namespace
 
 void ModuleHandler::RegisterMethods() {
@@ -109,6 +120,8 @@ void ModuleHandler::RegisterMethods() {
     dispatcher.RegisterMethod("module.list", List);
     dispatcher.RegisterMethod("module.get", Get);
     dispatcher.RegisterMethod("module.get_main", GetMain);
+    dispatcher.RegisterMethod("module.get_exports", GetExports);
+    dispatcher.RegisterMethod("module.get_imports", GetImports);
     
     Logger::Info("Registered module.* methods");
 }
@@ -212,6 +225,70 @@ json ModuleHandler::GetMain(const json& params) {
     result["name"] = StringUtils::FixUtf8Mojibake(info.name);
     result["path"] = StringUtils::FixUtf8Mojibake(info.path);
     
+    return result;
+}
+
+json ModuleHandler::GetExports(const json& params) {
+    if (!params.contains("module"))
+        throw InvalidParamsException("Missing required parameter: module");
+
+    std::string moduleName = params["module"].get<std::string>();
+    Script::Module::ModuleInfo modInfo;
+    if (!ResolveModuleInfo(moduleName, modInfo))
+        throw MCPException("Module not found: " + moduleName);
+
+    BridgeList<Script::Module::ModuleExport> list;
+    if (!Script::Module::GetExports(&modInfo, &list))
+        throw MCPException("Failed to get exports for: " + moduleName);
+
+    json exports = json::array();
+    for (size_t i = 0; i < list.Count(); ++i) {
+        const auto& e = list[i];
+        json entry;
+        entry["name"] = std::string(e.name);
+        entry["ordinal"] = static_cast<uint64_t>(e.ordinal);
+        entry["rva"] = StringUtils::FormatAddress(static_cast<uint64_t>(e.rva));
+        entry["va"] = StringUtils::FormatAddress(static_cast<uint64_t>(e.va));
+        if (e.forwarded)
+            entry["forward"] = std::string(e.forwardName);
+        exports.push_back(entry);
+    }
+
+    json result;
+    result["module"] = StringUtils::FixUtf8Mojibake(modInfo.name);
+    result["count"] = exports.size();
+    result["exports"] = exports;
+    return result;
+}
+
+json ModuleHandler::GetImports(const json& params) {
+    if (!params.contains("module"))
+        throw InvalidParamsException("Missing required parameter: module");
+
+    std::string moduleName = params["module"].get<std::string>();
+    Script::Module::ModuleInfo modInfo;
+    if (!ResolveModuleInfo(moduleName, modInfo))
+        throw MCPException("Module not found: " + moduleName);
+
+    BridgeList<Script::Module::ModuleImport> list;
+    if (!Script::Module::GetImports(&modInfo, &list))
+        throw MCPException("Failed to get imports for: " + moduleName);
+
+    json imports = json::array();
+    for (size_t i = 0; i < list.Count(); ++i) {
+        const auto& imp = list[i];
+        json entry;
+        entry["name"] = std::string(imp.name);
+        entry["ordinal"] = static_cast<uint64_t>(imp.ordinal);
+        entry["iat_rva"] = StringUtils::FormatAddress(static_cast<uint64_t>(imp.iatRva));
+        entry["iat_va"] = StringUtils::FormatAddress(static_cast<uint64_t>(imp.iatVa));
+        imports.push_back(entry);
+    }
+
+    json result;
+    result["module"] = StringUtils::FixUtf8Mojibake(modInfo.name);
+    result["count"] = imports.size();
+    result["imports"] = imports;
     return result;
 }
 

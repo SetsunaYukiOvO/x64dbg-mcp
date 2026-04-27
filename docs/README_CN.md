@@ -9,14 +9,14 @@
 ## 功能特性
 
 - **完整 MCP 规范支持**：实现 MCP 三大核心构件
-  - **Tools（69）**：可由 AI 调用的调试函数
+  - **Tools（78）**：可由 AI 调用的调试函数
   - **Resources（15）**：由应用控制的上下文数据源
   - **Prompts（10）**：用户引导的调试工作流模板
 
 - **JSON-RPC 2.0 协议**：标准、语言无关的接口
 - **HTTP + SSE 通信**：通过 Server-Sent Events 提供现代 Web 集成
 
-- **Tools - AI 可控调试（69 个函数）**：
+- **Tools - AI 可控调试（78 个函数）**：
   - 执行控制（run、pause、step、run_to）
   - 内存读/写/搜索/分配
   - 寄存器访问（50+ 寄存器，含 GPR、SSE、AVX）
@@ -42,7 +42,38 @@
 - **安全性**：基于权限的访问控制
 - **可扩展性**：支持自定义方法、资源与提示的插件架构
 
-## v1.0.3 更新内容
+## v1.0.4 更新内容
+
+- **新增 12 个工具**（66 → 78）
+  - `eval_expression` — 求值 x64dbg 表达式（数学运算、符号名、寄存器、内存解引用）
+  - `xref_get` — 交叉引用分析（查找调用者、跳转来源、数据引用）
+  - `function_list` / `function_get` — 已识别函数枚举与边界查询
+  - `module_get_exports` / `module_get_imports` — 模块导入/导出表查看
+  - `assembler_assemble` — 汇编指令到机器码（可选写入内存）
+  - `bookmark_set` / `bookmark_delete` / `bookmark_list` — 书签管理
+  - `patch_list` / `patch_restore` — 补丁追踪与回滚
+
+- **地址解析增强**
+  - 所有地址参数现在支持符号名（`kernel32.IsDebuggerPresent`）、寄存器名（`RIP`）和 x64dbg 表达式（`rax+rbx*2`、`[rsp+8]`）
+
+- **内存搜索增强**
+  - `memory_search` 支持连续 hex（`4D5A9000`）和空格分隔（`4D 5A 90 00`）两种格式，含通配符（`4883EC??48`）
+
+- **Dump 改进**
+  - 修复导出 PE 的 `ImageBase`（不再使用 ASLR 运行时地址）
+  - 移除不可靠的自动脱壳、IAT 重建、重定位修复等空壳功能
+  - Dump 工具集精简为 5 个经过测试的可靠工具
+
+- **Claude Code 插件**
+  - 新增 `skills/` 目录，结构化为 Claude Code 插件，包含 11 个逆向工程斜杠命令
+  - 附带工具速查表和逆向工程模式知识库
+
+- **MCP 提示词优化**
+  - 10 个提示词模板全部重写，采用多阶段工作流、具体工具名和结构化输出格式
+
+## 历史版本
+
+### v1.0.3
 
 - **通用化脱壳逻辑**
   - 扩展转移/OEP 识别模式（`E9`、`EB`、`FF25`、`push-ret`、`mov-jmp`、`movabs-jmp`）
@@ -210,7 +241,7 @@ copy config.json <x64dbg-path>\x32\plugins\x32dbg-mcp\
 
 ```json
 {
-  "version": "1.0.3",
+  "version": "1.0.4",
   "server": {
     "address": "127.0.0.1",
     "port": 3000

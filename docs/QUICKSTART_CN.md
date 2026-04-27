@@ -229,7 +229,7 @@ instructions = response["result"]["instructions"]
 
 ```json
 {
-  "version": "1.0.3",
+  "version": "1.0.4",
   "server": {
     "address": "127.0.0.1",
     "port": 3000

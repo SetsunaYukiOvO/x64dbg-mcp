@@ -1,5 +1,5 @@
 {
-  "version": "1.0.3",
+  "version": "1.0.4",
   "server": {
     "address": "127.0.0.1",
     "port": 3000
@@ -23,7 +23,13 @@
       "comment.*",
       "script.*",
       "context.*",
-      "dump.*"
+      "dump.*",
+      "eval.*",
+      "xref.*",
+      "function.*",
+      "assembler.*",
+      "bookmark.*",
+      "patch.*"
     ]
   },
   "logging": {
