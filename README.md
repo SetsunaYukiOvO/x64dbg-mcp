@@ -10,7 +10,7 @@ A Model Context Protocol (MCP) server implementation for x64dbg and x32dbg, enab
 
 - **Full MCP Specification Compliance**: Implements all three core MCP building blocks
   - **Tools (78)**: AI-invokable debugging functions
-  - **Resources (15)**: Application-controlled context data sources
+  - **Resources (7 + 8 templates)**: Application-controlled context data sources
   - **Prompts (10)**: User-guided debugging workflow templates
   
 - **JSON-RPC 2.0 Protocol**: Standard, language-agnostic interface
@@ -28,7 +28,7 @@ A Model Context Protocol (MCP) server implementation for x64dbg and x32dbg, enab
   - **Script execution** (execute x64dbg commands, batch operations)
   - **Context snapshots** (capture and compare debugging state)
   
-- **Resources - Context Providers (15 sources)**:
+- **Resources - Context Providers (7 direct + 8 templates)**:
   - Direct resources: debugger state, registers, modules, threads, memory map, breakpoints, stack
   - Resource templates: memory content, disassembly, module info, symbol resolution, function analysis
   - Read-only, application-controlled access
