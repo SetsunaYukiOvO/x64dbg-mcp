@@ -1,6 +1,7 @@
 {
   "name": "x64dbg-mcp",
   "version": "1.0.6",
+  "builtin-baseline": "8097e8d34cd45f7a5b1f5d90c92be2198e3d712f",
   "dependencies": [
     "nlohmann-json"
   ]
