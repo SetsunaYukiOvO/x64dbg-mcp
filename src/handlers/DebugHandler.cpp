@@ -19,6 +19,7 @@ void DebugHandler::RegisterMethods() {
     dispatcher.RegisterMethod("debug.step_out", StepOut);
     dispatcher.RegisterMethod("debug.run_to", RunTo);
     dispatcher.RegisterMethod("debug.restart", Restart);
+    dispatcher.RegisterMethod("debug.init", Init);
     dispatcher.RegisterMethod("debug.stop", Stop);
     
     Logger::Info("Registered debug.* methods");
@@ -154,6 +155,42 @@ json DebugHandler::Restart(const json& params) {
     return {
         {"success", success}
     };
+}
+
+json DebugHandler::Init(const json& params) {
+    auto& controller = DebugController::Instance();
+
+    std::string path = RequestValidator::GetString(params, "path", "");
+    std::string arguments = RequestValidator::GetString(params, "arguments", "");
+    std::string currentDir = RequestValidator::GetString(params, "current_dir", "");
+
+    if (path.empty()) {
+        // Fall back to the cached path from a previous session.
+        path = controller.GetLastDebuggedPath();
+    }
+
+    if (path.empty()) {
+        return {
+            {"success", false},
+            {"error", "No executable path provided and no previously debugged target cached"}
+        };
+    }
+
+    bool success = controller.Init(path, arguments, currentDir);
+
+    json result = {
+        {"success", success},
+        {"path", path}
+    };
+
+    if (!arguments.empty()) {
+        result["arguments"] = arguments;
+    }
+    if (!currentDir.empty()) {
+        result["current_dir"] = currentDir;
+    }
+
+    return result;
 }
 
 json DebugHandler::Stop(const json& params) {

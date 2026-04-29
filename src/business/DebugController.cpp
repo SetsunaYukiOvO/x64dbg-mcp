@@ -247,28 +247,109 @@ bool DebugController::RunToAddress(uint64_t address) {
 }
 
 bool DebugController::Restart() {
-    if (!IsDebugging()) {
-        throw DebuggerNotRunningException();
-    }
-
     // x64dbg has no "restart" script command. The GUI's Restart action
     // executes `init "<last debugged file>"` (see x64dbg's
-    // MainWindow::restartDebugging). Reproduce that here using the
-    // currently debugged main module path.
-    char path[MAX_PATH] = {};
-    if (!Script::Module::GetMainModulePath(path) || path[0] == '\0') {
-        Logger::Error("Restart failed: unable to resolve main module path");
+    // MainWindow::restartDebugging). Reproduce that here.
+    //
+    // When a session is active we can resolve the path from the currently
+    // loaded main module. When the debuggee has already exited (crash / exit
+    // process / user-initiated stop) we fall back to the last path cached by
+    // a previous Init/Restart so the bot can re-launch without knowing the
+    // original path.
+    std::string resolvedPath;
+
+    if (IsDebugging()) {
+        char path[MAX_PATH] = {};
+        if (Script::Module::GetMainModulePath(path) && path[0] != '\0') {
+            resolvedPath.assign(path);
+        }
+    }
+
+    if (resolvedPath.empty()) {
+        resolvedPath = LoadLastDebuggedPath();
+    }
+
+    if (resolvedPath.empty()) {
+        Logger::Error("Restart failed: no debuggee path available (session inactive and cache empty)");
         return false;
     }
 
+    return Init(resolvedPath);
+}
+
+bool DebugController::Init(const std::string& path,
+                           const std::string& arguments,
+                           const std::string& currentDir) {
+    std::string resolvedPath = path;
+    if (resolvedPath.empty()) {
+        resolvedPath = LoadLastDebuggedPath();
+    }
+
+    if (resolvedPath.empty()) {
+        Logger::Error("Init failed: no executable path provided and no cached path available");
+        return false;
+    }
+
+    // Build `init "<path>"[, "<args>"[, "<wdir>"]]`. x64dbg's command parser
+    // splits arguments on commas, so quoting each component keeps paths with
+    // spaces or commas intact. Escape embedded quotes to prevent command injection.
+    auto escapeQuotes = [](const std::string& s) {
+        std::string out;
+        out.reserve(s.size());
+        for (char c : s) {
+            if (c == '"') out += '\\';
+            out += c;
+        }
+        return out;
+    };
+
     std::string command;
-    command.reserve(MAX_PATH + 8);
+    command.reserve(resolvedPath.size() + arguments.size() + currentDir.size() + 32);
     command.append("init \"");
-    command.append(path);
+    command.append(escapeQuotes(resolvedPath));
     command.append("\"");
 
-    Logger::Debug("Restarting debugger via: {}", command);
-    return ExecuteCommand(command);
+    if (!arguments.empty()) {
+        command.append(", \"");
+        command.append(escapeQuotes(arguments));
+        command.append("\"");
+    }
+
+    if (!currentDir.empty()) {
+        if (arguments.empty()) {
+            command.append(", \"\"");
+        }
+        command.append(", \"");
+        command.append(escapeQuotes(currentDir));
+        command.append("\"");
+    }
+
+    Logger::Debug("Starting debugger via: {}", command);
+    const bool success = ExecuteCommand(command);
+    if (success) {
+        CacheLastDebuggedPath(resolvedPath);
+    }
+    return success;
+}
+
+std::string DebugController::GetLastDebuggedPath() const {
+    return LoadLastDebuggedPath();
+}
+
+void DebugController::NotifyDebugSessionStarted(const std::string& path) {
+    if (!path.empty()) {
+        CacheLastDebuggedPath(path);
+    }
+}
+
+void DebugController::CacheLastDebuggedPath(const std::string& path) {
+    std::lock_guard<std::mutex> lock(m_lastPathMutex);
+    m_lastDebuggedPath = path;
+}
+
+std::string DebugController::LoadLastDebuggedPath() const {
+    std::lock_guard<std::mutex> lock(m_lastPathMutex);
+    return m_lastDebuggedPath;
 }
 
 bool DebugController::Stop() {

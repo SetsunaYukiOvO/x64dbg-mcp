@@ -6,6 +6,7 @@
 #include "core/MCPResourceRegistry.h"
 #include "core/MCPPromptRegistry.h"
 #include "core/X64DBGBridge.h"
+#include "business/DebugController.h"
 #include "handlers/DebugHandler.h"
 #include "handlers/RegisterHandler.h"
 #include "handlers/MemoryHandler.h"
@@ -31,7 +32,7 @@
 #include <fstream>
 
 // 鎻掍欢鐗堟湰淇℃�?
-#define PLUGIN_VERSION "1.0.5"
+#define PLUGIN_VERSION "1.0.6"
 
 // 鍙�?CMake 瑕嗙洊锛歅LUGIN_DISPLAY_NAME, PLUGIN_DIR_NAME
 #ifndef PLUGIN_DISPLAY_NAME
@@ -249,6 +250,14 @@ static void CB_UnloadDll(CBTYPE cbType, void* callbackInfo) {
  * @brief x64dbg 鍥炶�? 杩涚▼鍒涘缓
  */
 static void CB_CreateProcess(CBTYPE cbType, void* callbackInfo) {
+    // Cache the debuggee path so debug.restart / debug.init (with no path)
+    // can re-launch the target after the process exits or crashes, even if
+    // debugging was started via x64dbg's GUI.
+    char path[MAX_PATH] = {};
+    if (Script::Module::GetMainModulePath(path) && path[0] != '\0') {
+        DebugController::Instance().NotifyDebugSessionStarted(path);
+    }
+
     EventCallbackHandler::OnCreateProcess();
 }
 
@@ -496,7 +505,7 @@ extern "C" __declspec(dllexport) bool pluginit(PLUG_INITSTRUCT* initStruct) {
                 std::ofstream configFile(configPath);
                 if (configFile.is_open()) {
                     configFile << R"({
-  "version": "1.0.5",
+  "version": "1.0.6",
   "server": {
     "address": "127.0.0.1",
     "port": 3000
@@ -520,7 +529,13 @@ extern "C" __declspec(dllexport) bool pluginit(PLUG_INITSTRUCT* initStruct) {
       "comment.*",
       "script.*",
       "context.*",
-      "dump.*"
+      "dump.*",
+      "eval.*",
+      "xref.*",
+      "function.*",
+      "assembler.*",
+      "bookmark.*",
+      "patch.*"
     ]
   },
     "logging": {

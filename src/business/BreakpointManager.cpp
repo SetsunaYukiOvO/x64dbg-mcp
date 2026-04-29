@@ -5,9 +5,17 @@
 #include "../utils/StringUtils.h"
 #include "../core/X64DBGBridge.h"
 
-#ifdef X64DBG_SDK_AVAILABLE
+#ifdef XDBG_SDK_AVAILABLE
 #include "_scriptapi_debug.h"
 #endif
+
+namespace {
+const DBGFUNCTIONS* SafeDbgFunctions() {
+    const auto* f = DbgFunctions();
+    if (!f) throw MCP::MCPException("x64dbg SDK functions not available");
+    return f;
+}
+} // namespace
 
 namespace MCP {
 
@@ -291,9 +299,9 @@ std::optional<BreakpointInfo> BreakpointManager::GetBreakpoint(uint64_t address)
     BP_REF bpRef;
     memset(&bpRef, 0, sizeof(bpRef));
     
-    if (DbgFunctions()->BpRefVa(&bpRef, type, address)) {
+    if (SafeDbgFunctions()->BpRefVa(&bpRef, type, address)) {
         duint enabled = 0;
-        if (DbgFunctions()->BpGetFieldNumber(&bpRef, bpf_enabled, &enabled)) {
+        if (SafeDbgFunctions()->BpGetFieldNumber(&bpRef, bpf_enabled, &enabled)) {
             info.enabled = (enabled != 0);
         } else {
             info.enabled = true; // 默认为启用
@@ -301,7 +309,7 @@ std::optional<BreakpointInfo> BreakpointManager::GetBreakpoint(uint64_t address)
         
         // 获取日志断点信息
         std::string logText;
-        if (DbgFunctions()->BpGetFieldText(&bpRef, bpf_logtext, 
+        if (SafeDbgFunctions()->BpGetFieldText(&bpRef, bpf_logtext, 
             [](const char* str, void* userdata) {
                 if (str) {
                     *(std::string*)userdata = str;
@@ -493,13 +501,13 @@ bool BreakpointManager::SetCondition(uint64_t address, const std::string& condit
         type = bp_memory;
     }
     
-    if (!DbgFunctions()->BpRefVa(&bpRef, type, address)) {
+    if (!SafeDbgFunctions()->BpRefVa(&bpRef, type, address)) {
         Logger::Error("Failed to get breakpoint reference at 0x{:X}", address);
         return false;
     }
     
     // 设置断点条件
-    if (!DbgFunctions()->BpSetFieldText(&bpRef, bpf_breakcondition, condition.c_str())) {
+    if (!SafeDbgFunctions()->BpSetFieldText(&bpRef, bpf_breakcondition, condition.c_str())) {
         Logger::Error("Failed to set condition for breakpoint at 0x{:X}", address);
         return false;
     }
@@ -533,13 +541,13 @@ bool BreakpointManager::SetLogBreakpoint(uint64_t address, const std::string& me
         type = bp_memory;
     }
     
-    if (!DbgFunctions()->BpRefVa(&bpRef, type, address)) {
+    if (!SafeDbgFunctions()->BpRefVa(&bpRef, type, address)) {
         Logger::Error("Failed to get breakpoint reference at 0x{:X}", address);
         return false;
     }
     
     // 设置日志消息
-    if (!DbgFunctions()->BpSetFieldText(&bpRef, bpf_logtext, message.c_str())) {
+    if (!SafeDbgFunctions()->BpSetFieldText(&bpRef, bpf_logtext, message.c_str())) {
         Logger::Error("Failed to set log message for breakpoint at 0x{:X}", address);
         return false;
     }
@@ -573,13 +581,13 @@ bool BreakpointManager::RenameBreakpoint(uint64_t address, const std::string& na
         type = bp_memory;
     }
     
-    if (!DbgFunctions()->BpRefVa(&bpRef, type, address)) {
+    if (!SafeDbgFunctions()->BpRefVa(&bpRef, type, address)) {
         Logger::Error("Failed to get breakpoint reference at 0x{:X}", address);
         return false;
     }
     
     // 设置断点名称
-    if (!DbgFunctions()->BpSetFieldText(&bpRef, bpf_name, name.c_str())) {
+    if (!SafeDbgFunctions()->BpSetFieldText(&bpRef, bpf_name, name.c_str())) {
         Logger::Error("Failed to rename breakpoint at 0x{:X}", address);
         return false;
     }
@@ -620,14 +628,14 @@ uint32_t BreakpointManager::GetHitCount(uint64_t address) {
         type = bp_memory;
     }
     
-    if (!DbgFunctions()->BpRefVa(&bpRef, type, address)) {
+    if (!SafeDbgFunctions()->BpRefVa(&bpRef, type, address)) {
         Logger::Warning("Failed to get breakpoint reference at 0x{:X}", address);
         return 0;
     }
     
     // 获取命中次数字段
     duint hitCount = 0;
-    if (DbgFunctions()->BpGetFieldNumber(&bpRef, bpf_hitcount, &hitCount)) {
+    if (SafeDbgFunctions()->BpGetFieldNumber(&bpRef, bpf_hitcount, &hitCount)) {
         return static_cast<uint32_t>(hitCount);
     }
     
@@ -659,13 +667,13 @@ bool BreakpointManager::ResetHitCount(uint64_t address) {
         type = bp_memory;
     }
     
-    if (!DbgFunctions()->BpRefVa(&bpRef, type, address)) {
+    if (!SafeDbgFunctions()->BpRefVa(&bpRef, type, address)) {
         Logger::Error("Failed to get breakpoint reference at 0x{:X}", address);
         return false;
     }
     
     // 重置命中次数为 0
-    if (!DbgFunctions()->BpSetFieldNumber(&bpRef, bpf_hitcount, 0)) {
+    if (!SafeDbgFunctions()->BpSetFieldNumber(&bpRef, bpf_hitcount, 0)) {
         Logger::Error("Failed to reset hit count for breakpoint at 0x{:X}", address);
         return false;
     }

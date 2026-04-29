@@ -5,6 +5,17 @@ x64dbg MCP Server Plugin 的所有重要变更都会记录在此文件中。
 格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)，
 并采用 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
 
+## [1.0.6] - 2026-04-29
+
+### 新增
+- **新 MCP 工具 `debug_init`** — 通过加载可执行文件启动新的调试会话（对应 x64dbg 的 "Run" 按钮）。无论当前调试状态如何都可使用，便于目标进程崩溃/退出后重新拉起。支持可选参数 `path`、`arguments`、`current_dir`。
+
+### 变更
+- `debug_restart` 不再要求处于活跃调试会话 — 当进程已退出时回退到缓存的目标路径以恢复会话。
+
+### 内部
+- `DebugController` 在 `CB_CREATEPROCESS` 时缓存目标路径，供 restart/init 复用。
+
 ## [1.0.5] - 2026-04-29
 
 ### 修复

@@ -49,8 +49,10 @@ nlohmann::json BookmarkHandler::List(const nlohmann::json&) {
     nlohmann::json bookmarks = nlohmann::json::array();
     for (size_t i = 0; i < list.Count(); ++i) {
         const auto& b = list[i];
+        duint moduleBase = Script::Module::BaseFromName(b.mod);
+        uint64_t va = static_cast<uint64_t>(moduleBase) + static_cast<uint64_t>(b.rva);
         nlohmann::json entry;
-        entry["address"] = StringUtils::FormatAddress(static_cast<uint64_t>(b.rva));
+        entry["address"] = StringUtils::FormatAddress(va);
         entry["module"] = std::string(b.mod);
         entry["manual"] = b.manual;
         bookmarks.push_back(entry);
