@@ -42,62 +42,29 @@ A Model Context Protocol (MCP) server implementation for x64dbg and x32dbg, enab
 - **Security**: Permission-based access control
 - **Extensible**: Plugin architecture for custom methods, resources, and prompts
 
-## What's New in v1.0.4
+## What's New in v1.0.5
 
-- **12 New Tools** (66 → 78 total)
-  - `eval_expression` — evaluate x64dbg expressions (math, symbols, registers, memory dereferences)
-  - `xref_get` — cross-reference analysis (find callers, jump sources, data references)
-  - `function_list` / `function_get` — recognized function enumeration and boundary queries
-  - `module_get_exports` / `module_get_imports` — module import/export table inspection
-  - `assembler_assemble` — assemble instructions to machine code (with optional write-to-memory)
-  - `bookmark_set` / `bookmark_delete` / `bookmark_list` — bookmark management
-  - `patch_list` / `patch_restore` — patch tracking and rollback
-
-- **Address Parsing Enhancement**
-  - All address parameters now accept symbol names (`kernel32.IsDebuggerPresent`), register names (`RIP`, `RSP`), and x64dbg expressions (`rax+rbx*2`, `[rsp+8]`) via DbgEval fallback
-
-- **Memory Search Enhancement**
-  - `memory_search` now accepts both spaced (`4D 5A 90 00`) and continuous (`4D5A9000`) hex patterns, including wildcards (`4883EC??48`)
-
-- **Dump Improvements**
-  - Fixed `ImageBase` in dumped PE (was using ASLR runtime address, now uses standard 0x140000000 / 0x400000)
-  - Removed unreliable auto-unpack, IAT rebuild, and relocation fix stubs
-  - Cleaned up dump tool set to 5 reliable, tested tools
-
-- **Claude Code Plugin**
-  - New `skills/` directory structured as a Claude Code plugin with 11 reverse engineering slash commands
-  - Skill knowledge base with tool reference and RE pattern cheat sheets
-
-- **Optimized MCP Prompts**
-  - All 10 prompt templates rewritten with multi-phase workflows, specific tool names, and structured output formats
+- **Bug Fix**: `debug_restart` now works correctly — x64dbg has no `restart` script command; the tool now uses `init "<path>"` to mirror the GUI's restart behavior (PR #5 by @AMRICHASFUCK)
+- **Doc Fix**: Resource count corrected to "7 direct + 8 templates" (was incorrectly listed as 15)
 
 ## Previous Versions
 
+### v1.0.4
+
+- 12 new tools (66 → 78): `eval_expression`, `xref_get`, `function_list`/`function_get`, `module_get_exports`/`module_get_imports`, `assembler_assemble`, `bookmark_set`/`delete`/`list`, `patch_list`/`patch_restore`
+- Address parsing: all address params accept symbols, registers, and x64dbg expressions via DbgEval
+- `memory_search` continuous hex format support
+- Claude Code plugin (`skills/`) with 11 RE slash commands
+- All 10 MCP prompts rewritten with structured multi-phase workflows
+- Dump: fixed ImageBase, removed unreliable auto-unpack/IAT rebuild stubs
+
 ### v1.0.3
 
-- **Generalized Unpacking (Not UPX-only)**
-  - Expanded transfer/OEP recognition patterns (`E9`, `EB`, `FF25`, `push-ret`, `mov-jmp`, `movabs-jmp`)
-  - Reworked packed detection into generic layout heuristics
-  - Removed `UPX2` hardcoded import fallback path
-
-- **Dump/Unpack Stability Fixes**
-  - Fixed false-success unpack scenarios that could return copied packed images
-  - Fixed import fallback corrupting section raw layout and causing dumped EXE crashes
-  - Improved `debug_pause` reliability (forced break + pause state confirmation)
-  - Fixed `dump_auto_unpack` default `max_iterations` mismatch (`tools/list` showed `10` while runtime used `3`); default behavior is now consistently `10`
-
-- **Running-State Recovery**
-  - Added automatic paused-state recovery for `dump_module`, `dump_analyze_module`, and `dump_detect_oep`
-  - Added execution-context recovery for `dump_auto_unpack` when called mid-run outside target module
-  - Improved auto-unpack reliability for running-state invocation paths
-
-## Previous Releases
+- Generalized unpacking logic, dump/unpack stability fixes, running-state recovery
 
 ### v1.0.2
 
-- Automated testing critical bug fixes
-- Build system improvements and unified dual-architecture output
-- Documentation cleanup
+- Automated testing critical bug fixes, build system improvements
 
 ### v1.0.1
 
@@ -241,7 +208,7 @@ Edit `config.json` to customize settings:
 
 ```json
 {
-  "version": "1.0.4",
+  "version": "1.0.5",
   "server": {
     "address": "127.0.0.1",
     "port": 3000

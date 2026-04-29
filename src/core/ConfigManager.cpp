@@ -14,7 +14,7 @@ ConfigManager& ConfigManager::Instance() {
 json ConfigManager::CreateDefaultConfig() const {
     json config;
     
-    config["version"] = "1.0.4";
+    config["version"] = "1.0.5";
     
     // Server configuration
     config["server"]["address"] = "127.0.0.1";
