@@ -22,10 +22,11 @@ nlohmann::json PatchHandler::PatchList(const nlohmann::json&) {
     funcs->PatchEnum(nullptr, &bufSize);
 
     nlohmann::json patches = nlohmann::json::array();
-    if (bufSize > 0) {
+    if (bufSize >= sizeof(DBGPATCHINFO)) {
         size_t count = bufSize / sizeof(DBGPATCHINFO);
         std::vector<DBGPATCHINFO> patchBuf(count);
-        if (funcs->PatchEnum(patchBuf.data(), &bufSize)) {
+        size_t fillSize = count * sizeof(DBGPATCHINFO);
+        if (funcs->PatchEnum(patchBuf.data(), &fillSize)) {
             for (size_t i = 0; i < count; ++i) {
                 nlohmann::json entry;
                 entry["address"] = StringUtils::FormatAddress(static_cast<uint64_t>(patchBuf[i].addr));

@@ -928,8 +928,9 @@ std::optional<uint64_t> DumpManager::ParseModuleOrAddress(const std::string& inp
     }
     
     // 浣滀负妯″潡鍚嶆煡鎵?
-    char szModPath[MAX_PATH] = {0};
-    duint modBase = DbgFunctions()->ModBaseFromName(input.c_str());
+    auto* funcs = DbgFunctions();
+    if (!funcs) return std::nullopt;
+    duint modBase = funcs->ModBaseFromName(input.c_str());
     
     if (modBase != 0) {
         return modBase;
@@ -1082,7 +1083,9 @@ bool DumpManager::IsPacked(uint64_t moduleBase, std::string& packerId) {
 }
 
 uint64_t DumpManager::GetModuleSize(uint64_t moduleBase) {
-    duint size = DbgFunctions()->ModSizeFromAddr(moduleBase);
+    auto* funcs = DbgFunctions();
+    if (!funcs) return 0;
+    duint size = funcs->ModSizeFromAddr(moduleBase);
     return static_cast<uint64_t>(size);
 }
 
@@ -1094,7 +1097,8 @@ uint64_t DumpManager::GetModuleEntryPoint(uint64_t moduleBase) {
 
 std::string DumpManager::GetModulePath(uint64_t moduleBase) {
     char path[MAX_PATH] = {0};
-    if (DbgFunctions()->ModPathFromAddr(moduleBase, path, MAX_PATH)) {
+    auto* funcs = DbgFunctions();
+    if (funcs && funcs->ModPathFromAddr(moduleBase, path, MAX_PATH)) {
         return StringUtils::FixUtf8Mojibake(std::string(path));
     }
     return "";

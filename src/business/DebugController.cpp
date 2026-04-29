@@ -292,26 +292,35 @@ bool DebugController::Init(const std::string& path,
 
     // Build `init "<path>"[, "<args>"[, "<wdir>"]]`. x64dbg's command parser
     // splits arguments on commas, so quoting each component keeps paths with
-    // spaces or commas intact.
+    // spaces or commas intact. Escape embedded quotes to prevent command injection.
+    auto escapeQuotes = [](const std::string& s) {
+        std::string out;
+        out.reserve(s.size());
+        for (char c : s) {
+            if (c == '"') out += '\\';
+            out += c;
+        }
+        return out;
+    };
+
     std::string command;
-    command.reserve(resolvedPath.size() + arguments.size() + currentDir.size() + 16);
+    command.reserve(resolvedPath.size() + arguments.size() + currentDir.size() + 32);
     command.append("init \"");
-    command.append(resolvedPath);
+    command.append(escapeQuotes(resolvedPath));
     command.append("\"");
 
     if (!arguments.empty()) {
         command.append(", \"");
-        command.append(arguments);
+        command.append(escapeQuotes(arguments));
         command.append("\"");
     }
 
     if (!currentDir.empty()) {
         if (arguments.empty()) {
-            // `init` expects positional args — keep the cmdline slot empty.
             command.append(", \"\"");
         }
         command.append(", \"");
-        command.append(currentDir);
+        command.append(escapeQuotes(currentDir));
         command.append("\"");
     }
 
