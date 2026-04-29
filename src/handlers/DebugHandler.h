@@ -56,7 +56,16 @@ public:
      * @brief debug.restart - 重启调试
      */
     static json Restart(const json& params);
-    
+
+    /**
+     * @brief debug.init - 启动（或重新启动）目标程序
+     *
+     * Corresponds to x64dbg's "Run" button: loads the given executable and
+     * begins a new debug session. Works even when no session is currently
+     * active — useful when the previous debuggee has exited or crashed.
+     */
+    static json Init(const json& params);
+
     /**
      * @brief debug.stop - 停止调试
      */
