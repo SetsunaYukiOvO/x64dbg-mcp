@@ -293,7 +293,7 @@ json ConfigEditor::GetConfigFromControls(HWND hwndDlg) {
         s_config.value("features", json::object()).value("auto_start_mcp_on_plugin_load", false);
     
     // 保留version字段
-    config["version"] = s_config.value("version", "1.0.4");
+    config["version"] = s_config.value("version", "1.0.5");
     
     return config;
 }

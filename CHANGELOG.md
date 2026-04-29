@@ -5,6 +5,12 @@ All notable changes to the x64dbg MCP Server Plugin will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-04-29
+
+### Fixed
+- `debug_restart` now uses `init "<path>"` instead of non-existent `restart` command (PR #5 by @AMRICHASFUCK)
+- Resource count in documentation corrected to "7 direct + 8 templates"
+
 ## [1.0.4] - 2026-04-27
 
 ### Added

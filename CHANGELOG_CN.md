@@ -5,6 +5,12 @@ x64dbg MCP Server Plugin 的所有重要变更都会记录在此文件中。
 格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)，
 并采用 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
 
+## [1.0.5] - 2026-04-29
+
+### 修复
+- `debug_restart` 改用 `init "<path>"` 代替不存在的 `restart` 命令（PR #5 by @AMRICHASFUCK）
+- 文档中 Resources 数量修正为"7 个直接资源 + 8 个模板"
+
 ## [1.0.4] - 2026-04-27
 
 ### 新增

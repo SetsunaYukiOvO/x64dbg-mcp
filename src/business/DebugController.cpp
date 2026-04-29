@@ -250,9 +250,25 @@ bool DebugController::Restart() {
     if (!IsDebugging()) {
         throw DebuggerNotRunningException();
     }
-    
-    Logger::Debug("Restarting debugger");
-    return ExecuteCommand("restart");
+
+    // x64dbg has no "restart" script command. The GUI's Restart action
+    // executes `init "<last debugged file>"` (see x64dbg's
+    // MainWindow::restartDebugging). Reproduce that here using the
+    // currently debugged main module path.
+    char path[MAX_PATH] = {};
+    if (!Script::Module::GetMainModulePath(path) || path[0] == '\0') {
+        Logger::Error("Restart failed: unable to resolve main module path");
+        return false;
+    }
+
+    std::string command;
+    command.reserve(MAX_PATH + 8);
+    command.append("init \"");
+    command.append(path);
+    command.append("\"");
+
+    Logger::Debug("Restarting debugger via: {}", command);
+    return ExecuteCommand(command);
 }
 
 bool DebugController::Stop() {

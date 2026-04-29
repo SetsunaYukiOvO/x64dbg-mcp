@@ -10,7 +10,7 @@
 
 - **完整 MCP 规范支持**：实现 MCP 三大核心构件
   - **Tools（78）**：可由 AI 调用的调试函数
-  - **Resources（15）**：由应用控制的上下文数据源
+  - **Resources（7 + 8 模板）**：由应用控制的上下文数据源
   - **Prompts（10）**：用户引导的调试工作流模板
 
 - **JSON-RPC 2.0 协议**：标准、语言无关的接口
@@ -28,7 +28,7 @@
   - **脚本执行**（执行 x64dbg 命令、批量操作）
   - **上下文快照**（捕获并比较调试状态）
 
-- **Resources - 上下文提供器（15 个来源）**：
+- **Resources - 上下文提供器（7 个直接资源 + 8 个模板）**：
   - 直接资源：调试器状态、寄存器、模块、线程、内存映射、断点、栈
   - 资源模板：内存内容、反汇编、模块信息、符号解析、函数分析
   - 只读、由应用控制的访问方式
@@ -42,69 +42,25 @@
 - **安全性**：基于权限的访问控制
 - **可扩展性**：支持自定义方法、资源与提示的插件架构
 
-## v1.0.4 更新内容
+## v1.0.5 更新内容
 
-- **新增 12 个工具**（66 → 78）
-  - `eval_expression` — 求值 x64dbg 表达式（数学运算、符号名、寄存器、内存解引用）
-  - `xref_get` — 交叉引用分析（查找调用者、跳转来源、数据引用）
-  - `function_list` / `function_get` — 已识别函数枚举与边界查询
-  - `module_get_exports` / `module_get_imports` — 模块导入/导出表查看
-  - `assembler_assemble` — 汇编指令到机器码（可选写入内存）
-  - `bookmark_set` / `bookmark_delete` / `bookmark_list` — 书签管理
-  - `patch_list` / `patch_restore` — 补丁追踪与回滚
-
-- **地址解析增强**
-  - 所有地址参数现在支持符号名（`kernel32.IsDebuggerPresent`）、寄存器名（`RIP`）和 x64dbg 表达式（`rax+rbx*2`、`[rsp+8]`）
-
-- **内存搜索增强**
-  - `memory_search` 支持连续 hex（`4D5A9000`）和空格分隔（`4D 5A 90 00`）两种格式，含通配符（`4883EC??48`）
-
-- **Dump 改进**
-  - 修复导出 PE 的 `ImageBase`（不再使用 ASLR 运行时地址）
-  - 移除不可靠的自动脱壳、IAT 重建、重定位修复等空壳功能
-  - Dump 工具集精简为 5 个经过测试的可靠工具
-
-- **Claude Code 插件**
-  - 新增 `skills/` 目录，结构化为 Claude Code 插件，包含 11 个逆向工程斜杠命令
-  - 附带工具速查表和逆向工程模式知识库
-
-- **MCP 提示词优化**
-  - 10 个提示词模板全部重写，采用多阶段工作流、具体工具名和结构化输出格式
+- **Bug 修复**：`debug_restart` 现在正确工作 — x64dbg 没有 `restart` 脚本命令，改为使用 `init "<path>"` 模拟 GUI 的重启行为（PR #5 by @AMRICHASFUCK）
+- **文档修复**：Resources 数量修正为"7 个直接资源 + 8 个模板"（之前错误标注为 15）
 
 ## 历史版本
+
+### v1.0.4
+
+- 新增 12 个工具（66 → 78）：`eval_expression`、`xref_get`、`function_list`/`function_get`、`module_get_exports`/`module_get_imports`、`assembler_assemble`、`bookmark_set`/`delete`/`list`、`patch_list`/`patch_restore`
+- 地址参数支持符号名、寄存器名和 x64dbg 表达式（DbgEval 回退）
+- `memory_search` 支持连续 hex 格式
+- Claude Code 插件（`skills/`）含 11 个逆向工程斜杠命令
+- 10 个 MCP 提示词模板重写为多阶段结构化工作流
+- Dump：修复 ImageBase，移除不可靠的自动脱壳/IAT 重建空壳
 
 ### v1.0.3
 
-- **通用化脱壳逻辑**
-  - 扩展转移/OEP 识别模式（`E9`、`EB`、`FF25`、`push-ret`、`mov-jmp`、`movabs-jmp`）
-  - 将 packed 检测重构为通用布局启发式评分模型
-  - 移除 `UPX2` 硬编码导入回退路径
-
-- **Dump/脱壳稳定性修复**
-  - 修复 `dump_auto_unpack` 假成功场景（可能返回复制的壳层镜像）
-  - 修复导入回退破坏节区原始布局并导致 dumped EXE 崩溃的问题
-  - 提升 `debug_pause` 可靠性（强制中断 + 暂停状态确认）
-  - 修复 `dump_auto_unpack` 默认 `max_iterations` 不一致问题（`tools/list` 为 `10`，运行时曾为 `3`），现统一为 `10`
-
-- **运行态恢复能力**
-  - 为 `dump_module`、`dump_analyze_module`、`dump_detect_oep` 增加自动暂停状态恢复
-  - 为 `dump_auto_unpack` 增加运行中且上下文位于目标模块外时的执行上下文恢复
-  - 提升运行态调用路径下自动脱壳可靠性
-
-## 历史版本
-
-### v1.0.2
-
-- 自动化测试关键缺陷修复
-- 构建系统改进与双架构统一输出
-- 文档清理
-
-### v1.0.1
-
-- 线程与栈管理 API
-- 增强错误处理与日志
-
-完整版本历史见 [CHANGELOG_CN.md](../CHANGELOG_CN.md)
+- 通用化脱壳逻辑、Dump 稳定性修复、运行态恢复
 
 ## 从源码构建
 
@@ -241,7 +197,7 @@ copy config.json <x64dbg-path>\x32\plugins\x32dbg-mcp\
 
 ```json
 {
-  "version": "1.0.4",
+  "version": "1.0.5",
   "server": {
     "address": "127.0.0.1",
     "port": 3000
