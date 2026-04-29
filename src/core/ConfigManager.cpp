@@ -14,7 +14,7 @@ ConfigManager& ConfigManager::Instance() {
 json ConfigManager::CreateDefaultConfig() const {
     json config;
     
-    config["version"] = "1.0.5";
+    config["version"] = "1.0.6";
     
     // Server configuration
     config["server"]["address"] = "127.0.0.1";
@@ -29,7 +29,8 @@ json ConfigManager::CreateDefaultConfig() const {
         "debug.*", "register.*", "memory.*", "breakpoint.*",
         "disasm.*", "disassembly.*", "module.*", "symbol.*",
         "thread.*", "stack.*", "comment.*", "script.*",
-        "context.*", "dump.*"
+        "context.*", "dump.*", "eval.*", "xref.*",
+        "function.*", "assembler.*", "bookmark.*", "patch.*"
     });
     
     // Logging

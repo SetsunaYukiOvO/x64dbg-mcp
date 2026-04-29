@@ -24,7 +24,7 @@ A Model Context Protocol (MCP) server implementation for x64dbg and x32dbg, enab
   - Disassembly and symbol resolution
   - Thread management (list, switch, suspend, resume)
   - Stack trace and analysis
-  - **Dump & Unpacking** (module dump, memory dump, auto-unpacking, OEP detection, IAT reconstruction)
+  - **Dump & Analysis** (module dump, memory dump, packer detection, OEP detection)
   - **Script execution** (execute x64dbg commands, batch operations)
   - **Context snapshots** (capture and compare debugging state)
   
@@ -213,7 +213,7 @@ Edit `config.json` to customize settings:
 
 ```json
 {
-  "version": "1.0.5",
+  "version": "1.0.6",
   "server": {
     "address": "127.0.0.1",
     "port": 3000

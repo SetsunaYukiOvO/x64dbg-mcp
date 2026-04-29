@@ -19,10 +19,11 @@ Activate this skill when:
 - Monitoring API calls and system behavior
 - Patching binary code
 
-## Available MCP Tools (78 total)
+## Available MCP Tools (79 total)
 
-### Debug Control (9 tools)
+### Debug Control (10 tools)
 - `debug_get_state` - Check debugger state (paused/running/stopped)
+- `debug_init` - Start a new debug session by loading an executable (params: `path?`, `arguments?`, `current_dir?`)
 - `debug_run` - Continue execution
 - `debug_pause` - Break execution
 - `debug_step_into` - Single step into calls

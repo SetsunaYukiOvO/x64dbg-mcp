@@ -1,6 +1,6 @@
 # x64dbg MCP Tool Reference
 
-Quick reference for all 78 MCP tools organized by category.
+Quick reference for all 79 MCP tools organized by category.
 
 ## Tool Name Convention
 
@@ -13,6 +13,7 @@ Quick reference for all 78 MCP tools organized by category.
 | Tool | Parameters | Description |
 |------|-----------|-------------|
 | `debug_get_state` | - | Get current state (paused/running/stopped) |
+| `debug_init` | `path?`, `arguments?`, `current_dir?` | Start new debug session (load executable) |
 | `debug_run` | - | Continue execution |
 | `debug_pause` | - | Break execution |
 | `debug_step_into` | - | Step into calls |

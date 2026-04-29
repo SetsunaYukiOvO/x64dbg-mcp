@@ -24,7 +24,7 @@
   - 反汇编与符号解析
   - 线程管理（列出、切换、挂起、恢复）
   - 调用栈追踪与分析
-  - **Dump 与脱壳**（模块 dump、内存 dump、自动脱壳、OEP 检测、IAT 重建）
+  - **Dump 与分析**（模块 dump、内存 dump、加壳检测、OEP 检测）
   - **脚本执行**（执行 x64dbg 命令、批量操作）
   - **上下文快照**（捕获并比较调试状态）
 
@@ -202,7 +202,7 @@ copy config.json <x64dbg-path>\x32\plugins\x32dbg-mcp\
 
 ```json
 {
-  "version": "1.0.5",
+  "version": "1.0.6",
   "server": {
     "address": "127.0.0.1",
     "port": 3000

@@ -78,7 +78,7 @@ void MethodDispatcher::RegisterDefaultMethods() {
     RegisterMethod("system.info", [](const json& params) -> json {
         return {
             {"name", "x64dbg MCP Server"},
-            {"version", "1.0.5"},
+            {"version", "1.0.6"},
             {"protocol_version", "2.0"},
             {"capabilities", {
                 {"debug", true},

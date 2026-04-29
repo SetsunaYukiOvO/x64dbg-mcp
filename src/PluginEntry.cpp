@@ -505,7 +505,7 @@ extern "C" __declspec(dllexport) bool pluginit(PLUG_INITSTRUCT* initStruct) {
                 std::ofstream configFile(configPath);
                 if (configFile.is_open()) {
                     configFile << R"({
-  "version": "1.0.5",
+  "version": "1.0.6",
   "server": {
     "address": "127.0.0.1",
     "port": 3000
@@ -529,7 +529,13 @@ extern "C" __declspec(dllexport) bool pluginit(PLUG_INITSTRUCT* initStruct) {
       "comment.*",
       "script.*",
       "context.*",
-      "dump.*"
+      "dump.*",
+      "eval.*",
+      "xref.*",
+      "function.*",
+      "assembler.*",
+      "bookmark.*",
+      "patch.*"
     ]
   },
     "logging": {
