@@ -9,15 +9,15 @@ A Model Context Protocol (MCP) server implementation for x64dbg and x32dbg, enab
 ## Features
 
 - **Full MCP Specification Compliance**: Implements all three core MCP building blocks
-  - **Tools (78)**: AI-invokable debugging functions
+  - **Tools (79)**: AI-invokable debugging functions
   - **Resources (7 + 8 templates)**: Application-controlled context data sources
   - **Prompts (10)**: User-guided debugging workflow templates
   
 - **JSON-RPC 2.0 Protocol**: Standard, language-agnostic interface
 - **HTTP + SSE Communication**: Modern web-based integration via Server-Sent Events
 
-- **Tools - AI-Controlled Debugging (78 functions)**: 
-  - Execution control (run, pause, step, run_to)
+- **Tools - AI-Controlled Debugging (79 functions)**: 
+  - Execution control (init/run/pause/step/run_to/restart/stop)
   - Memory read/write/search/allocate
   - Register access (50+ registers including GPR, SSE, AVX)
   - Breakpoint management (software, hardware, memory, conditional, logging)
@@ -42,12 +42,17 @@ A Model Context Protocol (MCP) server implementation for x64dbg and x32dbg, enab
 - **Security**: Permission-based access control
 - **Extensible**: Plugin architecture for custom methods, resources, and prompts
 
-## What's New in v1.0.5
+## What's New in v1.0.6
+
+- **New Tool**: `debug_init` — starts a new debug session by loading an executable (equivalent to x64dbg's "Run" button). Works even when no session is active, so the bot can relaunch the target after a crash/exit without a reconnect. Accepts optional `path`, `arguments`, and `current_dir`; when `path` is omitted the most recently observed debuggee path is reused.
+- `debug_restart` no longer requires an active debug session — it now falls back to the cached debuggee path, so it can revive a session after the target exits or crashes.
+
+## Previous Versions
+
+### v1.0.5
 
 - **Bug Fix**: `debug_restart` now works correctly — x64dbg has no `restart` script command; the tool now uses `init "<path>"` to mirror the GUI's restart behavior (PR #5 by @AMRICHASFUCK)
 - **Doc Fix**: Resource count corrected to "7 direct + 8 templates" (was incorrectly listed as 15)
-
-## Previous Versions
 
 ### v1.0.4
 

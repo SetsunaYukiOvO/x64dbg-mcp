@@ -5,6 +5,17 @@ All notable changes to the x64dbg MCP Server Plugin will be documented in this f
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] - 2026-04-29
+
+### Added
+- **New MCP tool `debug_init` / JSON-RPC `debug.init`** — starts a new debug session by loading an executable (mirrors x64dbg's "Run" button). Works regardless of current debug state, so the bot can relaunch the debuggee after a crash/exit/manual stop without the client having to reconnect. Accepts optional `path`, `arguments`, and `current_dir`. When `path` is omitted, the most recently observed debuggee path is reused.
+
+### Changed
+- `debug_restart` no longer throws `DebuggerNotRunningException` when the debuggee has already exited — it falls back to the cached path captured from the last `CB_CREATEPROCESS` event (or from a prior `debug_init`/`debug_restart`) so it can revive a dead session.
+
+### Internal
+- `DebugController` now caches the debuggee path on `CB_CREATEPROCESS` via `NotifyDebugSessionStarted`; `GetLastDebuggedPath` exposes this for handlers.
+
 ## [1.0.5] - 2026-04-29
 
 ### Fixed

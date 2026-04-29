@@ -220,11 +220,22 @@ void MCPToolRegistry::RegisterDefaultTools() {
     
     RegisterTool({
         "debug_restart",
-        "Restart debugging session",
+        "Restart debugging session. Works even after the debuggee has exited/crashed as long as the target path has been observed in the current plugin session.",
         "debug.restart",
         {}
     });
-    
+
+    RegisterTool({
+        "debug_init",
+        "Start a new debug session by loading an executable (equivalent to x64dbg's 'Run' button). Works regardless of current debug state — use this to relaunch the target after a crash, exit, or manual stop. If 'path' is omitted, falls back to the most recently observed debuggee path.",
+        "debug.init",
+        {
+            {"path", "string", "Absolute path to the executable to debug. Optional — if omitted, the last observed debuggee path is reused.", false, "", nullptr},
+            {"arguments", "string", "Command-line arguments passed to the debuggee (optional).", false, "", nullptr},
+            {"current_dir", "string", "Working directory for the debuggee (optional).", false, "", nullptr}
+        }
+    });
+
     RegisterTool({
         "debug_stop",
         "Stop debugging and close target process",
