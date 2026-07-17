@@ -7,6 +7,12 @@ x64dbg MCP Server Plugin 的所有重要变更都会记录在此文件中。
 
 ## [Unreleased]
 
+### 新增
+- 为浏览器 MCP 客户端新增基于来源白名单的 CORS 支持：
+  - 所有 MCP HTTP 端点均支持 `OPTIONS` 预检请求。
+  - 普通响应和流式响应精确回显已验证的请求 Origin。
+  - SSE 端点继续遵循来源白名单，不使用通配 CORS。
+
 ### 修复
 - 修复 `debug_attach_pid` 在 x64dbg 上超时的问题：`mcpattach` 插件命令格式中带前导 `.`（如 `mcpattach .6520`），x64dbg 命令解析器原样传入 `argv[1]`。`ParsePidArg` 使用 `strtoul` 以十进制解析，`.` 导致解析静默失败 — `AttachProcessCore` 从未被调用，`WaitForDebugging` 15 秒后超时。
 - `ParsePidArg` 现在容错前导 `.`（x64dbg 十进制前缀）和 `0x`/`0X`（十六进制前缀）作为深度防御。

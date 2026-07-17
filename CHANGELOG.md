@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added CORS support for browser-based MCP clients with allowlisted origins:
+  - `OPTIONS` preflight requests are supported on all MCP HTTP endpoints.
+  - Standard and streaming responses reflect the validated request Origin.
+  - SSE endpoints preserve the origin allowlist instead of using wildcard CORS.
+
 ### Fixed
 - Fixed `debug_attach_pid` timing out on x64dbg: the `mcpattach` plugin command was formatted with a leading `.` (e.g. `mcpattach .6520`) which the x64dbg command parser passes verbatim to `argv[1]`. `ParsePidArg` uses `strtoul` with base 10, so `.` caused the parse to fail silently — `AttachProcessCore` was never called, and `WaitForDebugging` timed out after 15 seconds.
 - `ParsePidArg` now tolerates leading `.` (x64dbg decimal prefix) and `0x`/`0X` (hex prefix) for defense in depth.
