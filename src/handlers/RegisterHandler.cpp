@@ -47,15 +47,23 @@ json RegisterHandler::Set(const json& params) {
     
     std::string name = params["name"].get<std::string>();
     
-    // 解析值（支持字符串和数字）
     uint64_t value;
     if (params["value"].is_string()) {
-        std::string valueStr = params["value"].get<std::string>();
-        value = RequestValidator::ValidateAddress(valueStr);
-    } else if (params["value"].is_number()) {
+        try {
+            value = StringUtils::ParseAddress(params["value"].get<std::string>());
+        } catch (const std::exception&) {
+            throw InvalidParamsException("Invalid register value");
+        }
+    } else if (params["value"].is_number_unsigned()) {
         value = params["value"].get<uint64_t>();
+    } else if (params["value"].is_number_integer()) {
+        const int64_t signedValue = params["value"].get<int64_t>();
+        if (signedValue < 0) {
+            throw InvalidParamsException("Register value cannot be negative");
+        }
+        value = static_cast<uint64_t>(signedValue);
     } else {
-        throw InvalidParamsException("Value must be a string or number");
+        throw InvalidParamsException("Value must be a string or integer");
     }
     
     auto& manager = RegisterManager::Instance();

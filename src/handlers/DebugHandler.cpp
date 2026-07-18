@@ -1,5 +1,6 @@
 #include "DebugHandler.h"
 #include "../business/DebugController.h"
+#include "../core/ArchitectureRegisterNames.h"
 #include "../core/MethodDispatcher.h"
 #include "../core/RequestValidator.h"
 #include "../core/Logger.h"
@@ -41,7 +42,7 @@ json DebugHandler::GetState(const json& params) {
     if (controller.IsDebugging()) {
         try {
             uint64_t rip = controller.GetInstructionPointer();
-            result["rip"] = StringUtils::FormatAddress(rip);
+            result[ArchitectureRegisterNames::InstructionPointer] = StringUtils::FormatAddress(rip);
         } catch (...) {
             // 如果无法获取 RIP，忽略错误
         }
@@ -70,7 +71,7 @@ json DebugHandler::Run(const json& params) {
     if (controller.IsPaused()) {
         try {
             uint64_t rip = controller.GetInstructionPointer();
-            result["rip"] = StringUtils::FormatAddress(rip);
+            result[ArchitectureRegisterNames::InstructionPointer] = StringUtils::FormatAddress(rip);
             result["stop_reason"] = "breakpoint_or_exception";
         } catch (...) {
             // 忽略
@@ -99,7 +100,7 @@ json DebugHandler::Pause(const json& params) {
     };
     
     if (rip != 0) {
-        result["rip"] = StringUtils::FormatAddress(rip);
+        result[ArchitectureRegisterNames::InstructionPointer] = StringUtils::FormatAddress(rip);
     }
     
     return result;
@@ -111,7 +112,7 @@ json DebugHandler::StepInto(const json& params) {
     uint64_t rip = controller.StepInto();
     
     return {
-        {"rip", StringUtils::FormatAddress(rip)}
+        {ArchitectureRegisterNames::InstructionPointer, StringUtils::FormatAddress(rip)}
     };
 }
 
@@ -121,7 +122,7 @@ json DebugHandler::StepOver(const json& params) {
     uint64_t rip = controller.StepOver();
     
     return {
-        {"rip", StringUtils::FormatAddress(rip)}
+        {ArchitectureRegisterNames::InstructionPointer, StringUtils::FormatAddress(rip)}
     };
 }
 
@@ -131,15 +132,12 @@ json DebugHandler::StepOut(const json& params) {
     uint64_t rip = controller.StepOut();
     
     return {
-        {"rip", StringUtils::FormatAddress(rip)}
+        {ArchitectureRegisterNames::InstructionPointer, StringUtils::FormatAddress(rip)}
     };
 }
 
 json DebugHandler::RunTo(const json& params) {
-    RequestValidator::RequireString(params, "address");
-    
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = RequestValidator::ValidateAddress(addressStr);
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     
     auto& controller = DebugController::Instance();
     bool success = controller.RunToAddress(address);
@@ -275,7 +273,7 @@ json DebugHandler::AttachPid(const json& params) {
         }
         if (controller.IsDebugging()) {
             try {
-                result["rip"] = StringUtils::FormatAddress(controller.GetInstructionPointer());
+                result[ArchitectureRegisterNames::InstructionPointer] = StringUtils::FormatAddress(controller.GetInstructionPointer());
             } catch (...) {
             }
         }

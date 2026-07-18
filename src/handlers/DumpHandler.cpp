@@ -2,6 +2,7 @@
 #include "../business/DumpManager.h"
 #include "../core/MethodDispatcher.h"
 #include "../core/PermissionChecker.h"
+#include "../core/RequestValidator.h"
 #include "../core/Exceptions.h"
 #include "../core/Logger.h"
 #include "../utils/StringUtils.h"
@@ -130,11 +131,11 @@ nlohmann::json DumpHandler::DumpModule(const nlohmann::json& params) {
     const bool topLevelHasOEP = params.contains("oep");
     if (nestedHasOEP || topLevelHasOEP) {
         const nlohmann::json& oepNode = nestedHasOEP ? nestedOptions["oep"] : params["oep"];
-        if (!oepNode.is_string()) {
-            throw InvalidParamsException("Parameter 'oep' must be a string");
+        if (!oepNode.is_string() && !oepNode.is_number_integer()) {
+            throw InvalidParamsException("Parameter 'oep' must be a string or integer");
         }
 
-        const uint64_t forcedOEP = StringUtils::ParseAddress(oepNode.get<std::string>());
+        const uint64_t forcedOEP = RequestValidator::ValidateAddress(oepNode);
         options.forcedOEP = forcedOEP;
         options.fixOEP = true;
     }
@@ -166,8 +167,7 @@ nlohmann::json DumpHandler::DumpMemoryRegion(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: output_path");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     size_t size = params["size"].get<size_t>();
     std::string outputPath = params["output_path"].get<std::string>();
 
@@ -246,8 +246,7 @@ nlohmann::json DumpHandler::GetDumpableRegions(const nlohmann::json& params) {
     uint64_t moduleBase = 0;
     
     if (params.contains("module_base")) {
-        std::string baseStr = params["module_base"].get<std::string>();
-        moduleBase = StringUtils::ParseAddress(baseStr);
+        moduleBase = RequestValidator::GetAddress(params, "module_base");
     }
     
     auto& manager = DumpManager::Instance();

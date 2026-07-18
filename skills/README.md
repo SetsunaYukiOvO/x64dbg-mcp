@@ -1,4 +1,4 @@
-# x64dbg Reverse Engineering Plugin for Claude Code
+# x64dbg/x32dbg Reverse Engineering Plugin for Claude Code
 
 [English](#english) | [中文](#中文)
 
@@ -8,7 +8,7 @@
 
 ## Overview
 
-A Claude Code plugin that provides 11 reverse engineering slash commands for x64dbg debugger via MCP protocol. Each command is a structured workflow that guides Claude through complex debugging and analysis tasks.
+A Claude Code plugin that provides 11 reverse engineering slash commands for x64dbg/x32dbg via MCP. Each command is a structured workflow that guides Claude through complex debugging and analysis tasks.
 
 ## Installation
 
@@ -37,7 +37,7 @@ claude --plugin-dir path/to/x64dbg-mcp/skills
 
 ## Prerequisites
 
-1. **x64dbg** with the MCP server plugin installed and running
+1. **x64dbg or x32dbg** with the matching MCP server plugin installed and running
 2. **Claude Code** with MCP server configured (recommended — Streamable HTTP):
 
 ```json
@@ -104,7 +104,7 @@ claude --plugin-dir path/to/x64dbg-mcp/skills
 
 ## 概述
 
-一个 Claude Code 插件，提供 11 个逆向工程斜杠命令，通过 MCP 协议与 x64dbg 调试器交互。每个命令都是一个结构化工作流，指导 Claude 完成复杂的调试和分析任务。
+一个 Claude Code 插件，提供 11 个逆向工程斜杠命令，通过 MCP 协议与 x64dbg/x32dbg 交互。每个命令都是一个结构化工作流，指导 Claude 完成复杂的调试和分析任务。
 
 ## 安装
 
@@ -133,7 +133,7 @@ claude --plugin-dir path/to/x64dbg-mcp/skills
 
 ## 前提条件
 
-1. 安装了 MCP 服务器插件的 **x64dbg**，且已启动
+1. 安装了对应 MCP 服务器插件且已启动的 **x64dbg 或 x32dbg**
 2. **Claude Code** 已配置 MCP 服务器（推荐 — Streamable HTTP）：
 
 ```json

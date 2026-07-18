@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(x64dbg_mcp VERSION 1.0.9 LANGUAGES CXX RC)
+project(x64dbg_mcp VERSION 1.0.10 LANGUAGES CXX RC)
 
 # C++17 标准
 set(CMAKE_CXX_STANDARD 17)
@@ -18,6 +18,16 @@ option(ENABLE_LOGGING "Enable logging" ON)
 # 支持目标: x64 或 x86(x32dbg)
 set(XDBG_ARCH "x64" CACHE STRING "Target xdbg architecture: x64 or x86")
 set_property(CACHE XDBG_ARCH PROPERTY STRINGS x64 x86)
+
+if(NOT "${XDBG_ARCH}" STREQUAL "x64" AND NOT "${XDBG_ARCH}" STREQUAL "x86")
+    message(FATAL_ERROR "XDBG_ARCH must be x64 or x86 (got: ${XDBG_ARCH})")
+endif()
+
+if(XDBG_ARCH STREQUAL "x64" AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "XDBG_ARCH=x64 requires a 64-bit generator platform (CMAKE_SIZEOF_VOID_P=${CMAKE_SIZEOF_VOID_P}); configure with -A x64")
+elseif(XDBG_ARCH STREQUAL "x86" AND NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
+    message(FATAL_ERROR "XDBG_ARCH=x86 requires a 32-bit generator platform (CMAKE_SIZEOF_VOID_P=${CMAKE_SIZEOF_VOID_P}); configure with -A Win32")
+endif()
 
 # 允许用户通过 -DXDBG_SDK_DIR 指定 SDK 路径；否则使用项目内置目录（按架构）
 if(NOT DEFINED XDBG_SDK_DIR)
@@ -151,13 +161,49 @@ endif()
 # 链接库
 if(XDBG_ARCH STREQUAL "x86")
     # x32dbg SDK 库名
-    set(XDBG_BRIDGE_LIB "${XDBG_BUNDLED_SDK_DIR}/x32bridge.lib" CACHE STRING "Path to xdbg bridge lib (override if needed)")
-    set(XDBG_MAIN_LIB "${XDBG_BUNDLED_SDK_DIR}/x32dbg.lib" CACHE STRING "Path to xdbg main lib (override if needed)")
+    set(_XDBG_DEFAULT_BRIDGE_LIB "${XDBG_BUNDLED_SDK_DIR}/x32bridge.lib")
+    set(_XDBG_DEFAULT_MAIN_LIB "${XDBG_BUNDLED_SDK_DIR}/x32dbg.lib")
 else()
     # x64dbg SDK 库名
-    set(XDBG_BRIDGE_LIB "${XDBG_BUNDLED_SDK_DIR}/x64bridge.lib" CACHE STRING "Path to xdbg bridge lib (override if needed)")
-    set(XDBG_MAIN_LIB "${XDBG_BUNDLED_SDK_DIR}/x64dbg.lib" CACHE STRING "Path to xdbg main lib (override if needed)")
+    set(_XDBG_DEFAULT_BRIDGE_LIB "${XDBG_BUNDLED_SDK_DIR}/x64bridge.lib")
+    set(_XDBG_DEFAULT_MAIN_LIB "${XDBG_BUNDLED_SDK_DIR}/x64dbg.lib")
 endif()
+
+# Refresh derived defaults while preserving explicit overrides.
+set(_XDBG_KNOWN_BRIDGE_DEFAULTS
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/x64dbg-pluginsdk/x64bridge.lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/x64dbg-pluginsdk/x32bridge.lib"
+    "${XDBG_BUNDLED_SDK_DIR}/x64bridge.lib"
+    "${XDBG_BUNDLED_SDK_DIR}/x32bridge.lib"
+)
+set(_XDBG_KNOWN_MAIN_DEFAULTS
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/x64dbg-pluginsdk/x64dbg.lib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/x64dbg-pluginsdk/x32dbg.lib"
+    "${XDBG_BUNDLED_SDK_DIR}/x64dbg.lib"
+    "${XDBG_BUNDLED_SDK_DIR}/x32dbg.lib"
+)
+list(FIND _XDBG_KNOWN_BRIDGE_DEFAULTS "${XDBG_BRIDGE_LIB}" _XDBG_BRIDGE_DEFAULT_INDEX)
+list(FIND _XDBG_KNOWN_MAIN_DEFAULTS "${XDBG_MAIN_LIB}" _XDBG_MAIN_DEFAULT_INDEX)
+
+if(NOT DEFINED XDBG_BRIDGE_LIB)
+    set(XDBG_BRIDGE_LIB "${_XDBG_DEFAULT_BRIDGE_LIB}" CACHE STRING "Path to xdbg bridge lib (override if needed)")
+elseif((DEFINED XDBG_BRIDGE_LIB_DEFAULT AND "${XDBG_BRIDGE_LIB}" STREQUAL "${XDBG_BRIDGE_LIB_DEFAULT}")
+       OR (NOT DEFINED XDBG_BRIDGE_LIB_DEFAULT AND NOT _XDBG_BRIDGE_DEFAULT_INDEX EQUAL -1))
+    set(XDBG_BRIDGE_LIB "${_XDBG_DEFAULT_BRIDGE_LIB}" CACHE STRING "Path to xdbg bridge lib (override if needed)" FORCE)
+else()
+    set(XDBG_BRIDGE_LIB "${XDBG_BRIDGE_LIB}" CACHE STRING "Path to xdbg bridge lib (override if needed)")
+endif()
+set(XDBG_BRIDGE_LIB_DEFAULT "${_XDBG_DEFAULT_BRIDGE_LIB}" CACHE INTERNAL "Architecture-derived xdbg bridge lib default" FORCE)
+
+if(NOT DEFINED XDBG_MAIN_LIB)
+    set(XDBG_MAIN_LIB "${_XDBG_DEFAULT_MAIN_LIB}" CACHE STRING "Path to xdbg main lib (override if needed)")
+elseif((DEFINED XDBG_MAIN_LIB_DEFAULT AND "${XDBG_MAIN_LIB}" STREQUAL "${XDBG_MAIN_LIB_DEFAULT}")
+       OR (NOT DEFINED XDBG_MAIN_LIB_DEFAULT AND NOT _XDBG_MAIN_DEFAULT_INDEX EQUAL -1))
+    set(XDBG_MAIN_LIB "${_XDBG_DEFAULT_MAIN_LIB}" CACHE STRING "Path to xdbg main lib (override if needed)" FORCE)
+else()
+    set(XDBG_MAIN_LIB "${XDBG_MAIN_LIB}" CACHE STRING "Path to xdbg main lib (override if needed)")
+endif()
+set(XDBG_MAIN_LIB_DEFAULT "${_XDBG_DEFAULT_MAIN_LIB}" CACHE INTERNAL "Architecture-derived xdbg main lib default" FORCE)
 
 target_link_libraries(x64dbg_mcp PRIVATE
     nlohmann_json::nlohmann_json

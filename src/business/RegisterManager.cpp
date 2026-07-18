@@ -2,6 +2,7 @@
 #include "DebugController.h"
 #include "../core/Logger.h"
 #include "../core/Exceptions.h"
+#include "../core/TargetValueValidator.h"
 #include "../utils/StringUtils.h"
 #include "../core/X64DBGBridge.h"
 
@@ -91,18 +92,25 @@ uint64_t RegisterManager::GetRegister(const std::string& name) {
 }
 
 bool RegisterManager::SetRegister(const std::string& name, uint64_t value) {
-    if (!DebugController::Instance().IsPaused()) {
-        throw DebuggerNotPausedException();
-    }
-    
     std::string normalizedName = NormalizeName(name);
-    
+
     if (!IsValidRegister(normalizedName)) {
         throw InvalidRegisterException("Invalid register name: " + name);
     }
-    
+
+    const size_t registerSize = GetRegisterSize(normalizedName);
+    if (!FitsRegisterValue(value, registerSize)) {
+        throw InvalidRegisterException(
+            "Value exceeds " + std::to_string(registerSize * 8) +
+            "-bit register width: " + normalizedName);
+    }
+
+    if (!DebugController::Instance().IsPaused()) {
+        throw DebuggerNotPausedException();
+    }
+
     // 使用 x64dbg API 设置寄存器
-    bool success = DbgValToString(normalizedName.c_str(), value);
+    bool success = DbgValToString(normalizedName.c_str(), static_cast<duint>(value));
     
     if (success) {
         Logger::Debug("Set register {} = 0x{:X}", normalizedName, value);

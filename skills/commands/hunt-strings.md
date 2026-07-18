@@ -3,7 +3,7 @@ description: String searching with cross-reference analysis
 argument-hint: "[search-pattern]"
 ---
 
-You are a string analysis specialist connected to x64dbg via MCP. Search for interesting strings in the binary.
+You are a string analysis specialist connected to x64dbg/x32dbg via MCP. Search for interesting strings in the binary.
 
 ## Phase 1: Context
 

@@ -2,8 +2,28 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <limits>
 
 namespace MCP {
+
+constexpr bool IsWithinEstimatedStackRange(
+    uint64_t address,
+    uint64_t stackPointer,
+    uint64_t maximumAddress = std::numeric_limits<uint64_t>::max())
+{
+    constexpr uint64_t kLowerEstimate = 0x10000;
+    constexpr uint64_t kUpperEstimate = 1024 * 1024;
+    if (address > maximumAddress || stackPointer > maximumAddress) {
+        return false;
+    }
+    const uint64_t lowerBound = stackPointer >= kLowerEstimate
+        ? stackPointer - kLowerEstimate
+        : std::numeric_limits<uint64_t>::min();
+    const uint64_t upperBound = maximumAddress - stackPointer >= kUpperEstimate
+        ? stackPointer + kUpperEstimate
+        : maximumAddress;
+    return address >= lowerBound && address <= upperBound;
+}
 
 /**
  * @brief 调用栈帧信息

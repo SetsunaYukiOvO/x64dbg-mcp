@@ -2,11 +2,11 @@
 
 [English](../QUICKSTART.md) | 中文
 
-几分钟内开始使用 x64dbg MCP 服务器。
+几分钟内开始使用 x64dbg/x32dbg MCP 服务器。
 
 ## 前置要求
 
-- Windows 10/11 (x64 或 x86)
+- Windows 10/11（64 位主机，可构建 x64 和 x86 插件）
 - 已安装 x64dbg 或 x32dbg 调试器
 - Visual Studio 2022 with C++ Desktop Development 工作负载
 - CMake 3.15+
@@ -48,48 +48,53 @@ setx VCPKG_ROOT "C:\vcpkg"
 git clone https://github.com/SetsunaYukiOvO/x64dbg-mcp.git
 cd x64dbg-mcp
 
-# 构建 x64 版本（默认）
+# 同时构建 x64 和 x86 版本（推荐）
 .\build.bat
 
-# 构建 x86 版本（32位）
-.\build.bat --arch x86
+# 仅构建 x64 版本
+.\build.bat --x64-only
 
-# 或使用特定选项构建
-.\build.bat --clean          # 清理构建
-.\build.bat --arch x86 --clean  # 清理 x86 构建
-.\build.bat --debug          # 调试构建
-.\build.bat --help           # 显示所有选项
+# 仅构建 x86 版本（32 位）
+.\build.bat --x86-only
+
+# 其他构建选项
+.\build.bat --clean             # 清理并重建双架构
+.\build.bat --x86-only --clean  # 仅清理并重建 x86
+.\build.bat --debug             # 构建双架构 Debug 版本
 ```
 
 构建脚本将：
 - 自动检测 vcpkg 安装
 - 下载并编译依赖项（nlohmann_json）
-- 使用 Visual Studio 为所选架构构建插件
-- 可选择自动安装到调试器插件目录
+- 使用 Visual Studio 构建所选架构的插件
+- 将输出复制到 `dist\` 目录
 
 **输出文件：**
-- x64: `build\bin\Release\x64dbg_mcp.dp64`
-- x86: `build\bin\Release\x32dbg_mcp.dp32`
+- x64：`dist\x64dbg_mcp.dp64`
+- x86：`dist\x32dbg_mcp.dp32`
 
 #### 3. 手动构建（高级）
 
 ```powershell
 # x64 配置
-cmake -B build -G "Visual Studio 17 2022" -A x64 ^
+cmake -B build_x64 -G "Visual Studio 17 2022" -A x64 ^
     -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
+    -DVCPKG_TARGET_TRIPLET=x64-windows ^
     -DXDBG_ARCH=x64
 
-# 或 x86 配置
-cmake -B build -G "Visual Studio 17 2022" -A Win32 ^
+# x86 配置
+cmake -B build_x86 -G "Visual Studio 17 2022" -A Win32 ^
     -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
+    -DVCPKG_TARGET_TRIPLET=x86-windows ^
     -DXDBG_ARCH=x86
 
-# 编译
-cmake --build build --config Release
+# 分别编译
+cmake --build build_x64 --config Release
+cmake --build build_x86 --config Release
 
 # 输出：
-# - x64: build\bin\Release\x64dbg_mcp.dp64
-# - x86: build\bin\Release\x32dbg_mcp.dp32
+# - x64: build_x64\bin\Release\x64dbg_mcp.dp64
+# - x86: build_x86\bin\Release\x32dbg_mcp.dp32
 ```
 
 ## 1. 安装插件
@@ -98,10 +103,10 @@ cmake --build build --config Release
 
 ```powershell
 # x64dbg
-copy build\bin\Release\x64dbg_mcp.dp64 C:\x64dbg\x64\plugins\
+copy dist\x64dbg_mcp.dp64 C:\x64dbg\x64\plugins\
 
 # x32dbg
-copy build\bin\Release\x32dbg_mcp.dp32 C:\x64dbg\x32\plugins\
+copy dist\x32dbg_mcp.dp32 C:\x64dbg\x32\plugins\
 
 # 复制配置文件（根据架构调整路径）
 mkdir C:\x64dbg\x64\plugins\x64dbg-mcp
@@ -193,14 +198,14 @@ response = client.call("system.info")
 
 ### 读取寄存器
 ```python
-response = client.call("register.get", {"name": "rax"})
+response = client.call("register.get", {"name": "rax"})  # x64；x86 使用 "eax"
 value = response["result"]["value"]
 ```
 
 ### 读取内存
 ```python
 response = client.call("memory.read", {
-    "address": "0x140001000",
+    "address": "cip",
     "size": 100
 })
 data = response["result"]["data"]  # 十六进制字符串
@@ -209,7 +214,7 @@ data = response["result"]["data"]  # 十六进制字符串
 ### 设置断点
 ```python
 response = client.call("breakpoint.set", {
-    "address": "0x140001000",
+    "address": "cip",
     "type": "software"
 })
 ```
@@ -217,7 +222,7 @@ response = client.call("breakpoint.set", {
 ### 反汇编
 ```python
 response = client.call("disassembly.at", {
-    "address": "0x140001000",
+    "address": "cip",
     "count": 10
 })
 instructions = response["result"]["instructions"]
@@ -229,7 +234,7 @@ instructions = response["result"]["instructions"]
 
 ```json
 {
-  "version": "1.0.9",
+  "version": "1.0.10",
   "server": {
     "address": "127.0.0.1",
     "port": 3000
@@ -270,7 +275,9 @@ instructions = response["result"]["instructions"]
 **构建时出现链接错误**
 - 确保 x64dbg SDK 库文件存在于 `include/x64dbg-pluginsdk/`
 - 尝试清理重建：`.\build.bat --clean`
-- 验证是否为 x64 架构构建
+- x64 使用 `-A x64`、`-DVCPKG_TARGET_TRIPLET=x64-windows`、`-DXDBG_ARCH=x64`
+- x86 使用 `-A Win32`、`-DVCPKG_TARGET_TRIPLET=x86-windows`、`-DXDBG_ARCH=x86`
+- 手动构建时使用独立的 `build_x64` 与 `build_x86` 目录，避免 CMake 缓存混用
 
 **找不到 vcpkg**
 - 安装 vcpkg：`git clone https://github.com/Microsoft/vcpkg.git C:\vcpkg`
@@ -279,15 +286,16 @@ instructions = response["result"]["instructions"]
 ### 运行时问题
 
 **插件无法加载**
-- 确保插件文件名为 `x64dbg_mcp.dp64`
-- 检查 x64dbg 版本（需要 64 位版本）
-- 查看 x64dbg 日志了解错误信息
+- x64dbg 使用 `x64\plugins\x64dbg_mcp.dp64`，x32dbg 使用 `x32\plugins\x32dbg_mcp.dp32`
+- 不要在 x32dbg 中加载 `.dp64`，也不要在 x64dbg 中加载 `.dp32`
+- 检查对应调试器版本（要求 x64dbg/x32dbg build 2023+）
+- 查看对应的 x64dbg/x32dbg 日志了解错误信息
 
 **服务器无法启动**
 - 检查端口 3000 是否未被占用
 - 验证 config.json 是否为有效的 JSON
-- 确保在 x64dbg 中加载了程序
-- 查看 x64dbg 日志获取详细错误信息
+- 确保在 x64dbg 或 x32dbg 中加载了程序
+- 查看对应的 x64dbg/x32dbg 日志获取详细错误信息
 
 **连接被拒绝**
 - 确保通过插件菜单启动了 HTTP 服务器（"Start MCP HTTP Server"）
@@ -304,14 +312,17 @@ build.bat [选项]
 
 选项:
   --debug         构建 Debug 模式（默认：Release）
-  --clean         构建前清理构建目录
-  --help          显示帮助信息
+  --release       构建 Release 模式
+  --clean         构建前清理双架构构建目录和 dist
+  --x64-only      仅构建 x64 插件
+  --x86-only      仅构建 x86 插件
 
 示例:
-  build.bat                    # Release 构建
-  build.bat --debug            # Debug 构建
-  build.bat --clean            # 清理并重建
-  build.bat --clean --debug    # 清理 Debug 构建
+  build.bat                    # 双架构 Release 构建
+  build.bat --debug            # 双架构 Debug 构建
+  build.bat --clean            # 清理并重建双架构
+  build.bat --x64-only         # 仅构建 x64
+  build.bat --x86-only --clean # 清理并重建 x86
 ```
 
 ## 开发技巧
@@ -324,7 +335,7 @@ build.bat [选项]
 # 重建（更快，增量编译）
 .\build.bat
 
-# x64dbg 必须重启才能重新加载插件
+# x64dbg/x32dbg 必须重启才能重新加载对应插件
 ```
 
 ### 开发用的 Debug 构建
@@ -333,14 +344,16 @@ build.bat [选项]
 # 构建带调试符号的版本
 .\build.bat --debug
 
-# 调试输出：build\bin\Debug\x64dbg_mcp.dp64
+# 调试输出：
+# - x64: build_x64\bin\Debug\x64dbg_mcp.dp64
+# - x86: build_x86\bin\Debug\x32dbg_mcp.dp32
 ```
 
 ## 高级功能（v1.1.0+）
 
 ### 脚本执行
 
-以编程方式执行 x64dbg 命令：
+以编程方式执行 x64dbg/x32dbg 命令：
 
 ```python
 # 执行单个命令
@@ -423,13 +436,11 @@ bp_snapshot = client.send_request("context.get_snapshot", {
     "include_stack": True
 })
 
-# 3. 使用脚本分析
+# 3. 使用脚本分析（根据目标架构选择参数命令）
+parameter_commands = ["? rcx", "? rdx"]  # x64
+# parameter_commands = ["? [esp+4]", "? [esp+8]"]  # x86
 client.send_request("script.execute_batch", {
-    "commands": [
-        "log \"VirtualAlloc 被调用！\"",
-        "? rcx",
-        "? rdx"
-    ]
+    "commands": ["log \"VirtualAlloc 被调用！\""] + parameter_commands
 })
 
 # 4. 继续并比较

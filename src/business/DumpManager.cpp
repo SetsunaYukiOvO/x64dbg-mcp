@@ -3,6 +3,7 @@
 #include "BreakpointManager.h"
 #include "MemoryManager.h"
 #include "../core/Logger.h"
+#include "../core/RequestValidator.h"
 #include "../core/Exceptions.h"
 #include "../utils/StringUtils.h"
 #include "../core/X64DBGBridge.h"
@@ -917,16 +918,11 @@ void DumpManager::SetOEPDetectionStrategy(
 // ========== 绉佹湁杈呭姪鏂规硶 ==========
 
 std::optional<uint64_t> DumpManager::ParseModuleOrAddress(const std::string& input) {
-    // 灏濊瘯浣滀负鍦板潃瑙ｆ瀽
-    try {
-        uint64_t addr = StringUtils::ParseAddress(input);
-        if (addr != 0) {
-            return addr;
-        }
-    } catch (...) {
-        // 涓嶆槸鍦板潃,灏濊瘯浣滀负妯″潡鍚?
+    auto address = RequestValidator::TryValidateAddressOrName(input);
+    if (address.has_value() && address.value() != 0) {
+        return address;
     }
-    
+
     // 浣滀负妯″潡鍚嶆煡鎵?
     auto* funcs = DbgFunctions();
     if (!funcs) return std::nullopt;

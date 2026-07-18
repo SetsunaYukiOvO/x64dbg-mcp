@@ -1,9 +1,11 @@
 ﻿#include "BreakpointHandler.h"
 #include "../business/BreakpointManager.h"
 #include "../core/MethodDispatcher.h"
+#include "../core/RequestValidator.h"
 #include "../core/PermissionChecker.h"
 #include "../core/Exceptions.h"
 #include "../utils/StringUtils.h"
+#include <limits>
 
 namespace MCP {
 
@@ -37,12 +39,19 @@ nlohmann::json BreakpointHandler::Set(const nlohmann::json& params) {
         );
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    const uint64_t address = RequestValidator::GetAddress(params, "address");
     
     std::string typeStr = params.value("type", "software");
     std::string name = params.value("name", "");
-    
+
+    if (typeStr != "hardware" &&
+        (params.contains("hw_condition") || params.contains("hw_size"))) {
+        throw InvalidParamsException("Hardware breakpoint parameters require type=hardware");
+    }
+    if (typeStr != "memory" && params.contains("mem_size")) {
+        throw InvalidParamsException("Memory breakpoint size requires type=memory");
+    }
+
     auto& manager = BreakpointManager::Instance();
     bool success = false;
     
@@ -50,36 +59,80 @@ nlohmann::json BreakpointHandler::Set(const nlohmann::json& params) {
         success = manager.SetSoftwareBreakpoint(address, name);
     }
     else if (typeStr == "hardware") {
-        // 瑙ｆ瀽纭欢鏂偣鍙傛暟
+        if (params.contains("hw_condition") && !params["hw_condition"].is_string()) {
+            throw InvalidParamsException("Hardware breakpoint condition must be a string");
+        }
+        int hwSize = 1;
+        if (params.contains("hw_size")) {
+            if (!params["hw_size"].is_number_integer()) {
+                throw InvalidParamsException("Hardware breakpoint size must be an integer");
+            }
+            if (params["hw_size"] == 1) {
+                hwSize = 1;
+            } else if (params["hw_size"] == 2) {
+                hwSize = 2;
+            } else if (params["hw_size"] == 4) {
+                hwSize = 4;
+            } else if (params["hw_size"] == 8) {
+                hwSize = 8;
+            } else {
+                throw InvalidParamsException("Hardware breakpoint size must be 1, 2, 4, or 8 bytes");
+            }
+        }
         std::string hwCondStr = params.value("hw_condition", "execute");
-        int hwSize = params.value("hw_size", 1);
-        
-        HardwareBreakpointCondition hwCond = HardwareBreakpointCondition::Execute;
-        if (hwCondStr == "write") {
+
+        HardwareBreakpointCondition hwCond;
+        if (hwCondStr == "execute") {
+            hwCond = HardwareBreakpointCondition::Execute;
+        } else if (hwCondStr == "write") {
             hwCond = HardwareBreakpointCondition::Write;
         } else if (hwCondStr == "readwrite" || hwCondStr == "access") {
             hwCond = HardwareBreakpointCondition::ReadWrite;
+        } else {
+            throw InvalidParamsException("Invalid hardware breakpoint condition: " + hwCondStr);
         }
-        
-        HardwareBreakpointSize hwSz = HardwareBreakpointSize::Byte1;
+
+        HardwareBreakpointSize hwSz;
         switch (hwSize) {
+            case 1: hwSz = HardwareBreakpointSize::Byte1; break;
             case 2: hwSz = HardwareBreakpointSize::Byte2; break;
             case 4: hwSz = HardwareBreakpointSize::Byte4; break;
-            case 8: hwSz = HardwareBreakpointSize::Byte8; break;
+            case 8:
+#ifdef XDBG_ARCH_X64
+                hwSz = HardwareBreakpointSize::Byte8;
+                break;
+#else
+                throw InvalidParamsException("8-byte hardware breakpoints are only supported on x64");
+#endif
+            default:
+                throw InvalidParamsException("Hardware breakpoint size must be 1, 2, 4, or 8 bytes");
         }
-        
+        if (hwCond == HardwareBreakpointCondition::Execute && hwSize != 1) {
+            throw InvalidParamsException("Execute hardware breakpoints must use a size of 1 byte");
+        }
+        if (address % static_cast<uint64_t>(hwSize) != 0) {
+            throw InvalidParamsException("Hardware breakpoint address must be aligned to its size");
+        }
+
         success = manager.SetHardwareBreakpoint(address, hwCond, hwSz, name);
     }
     else if (typeStr == "memory") {
-        size_t memSize = params.value("mem_size", 1);
-        success = manager.SetMemoryBreakpoint(address, memSize, name);
+        if (params.contains("mem_size") &&
+            (!params["mem_size"].is_number_integer() || params["mem_size"] < 1)) {
+            throw InvalidParamsException("Memory breakpoint size must be a positive integer");
+        }
+        const uint64_t memSizeValue = params.value("mem_size", UINT64_C(1));
+        if (memSizeValue == 0 || memSizeValue > std::numeric_limits<size_t>::max()) {
+            throw InvalidParamsException("Memory breakpoint size must fit the host size type and be greater than zero");
+        }
+        success = manager.SetMemoryBreakpoint(address, static_cast<size_t>(memSizeValue), name);
     }
     else {
         throw InvalidParamsException("Invalid breakpoint type: " + typeStr);
     }
     
     if (!success) {
-        throw MCPException("Failed to set breakpoint at: " + addressStr);
+        throw MCPException("Failed to set breakpoint at: " + StringUtils::FormatAddress(address));
     }
     
     // 濡傛灉鏈夋潯浠?璁剧疆鏉′欢
@@ -112,8 +165,7 @@ nlohmann::json BreakpointHandler::Delete(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    const uint64_t address = RequestValidator::GetAddress(params, "address");
     
     std::optional<BreakpointType> typeFilter;
     if (params.contains("type")) {
@@ -124,14 +176,16 @@ nlohmann::json BreakpointHandler::Delete(const nlohmann::json& params) {
             typeFilter = BreakpointType::Hardware;
         } else if (typeStr == "memory") {
             typeFilter = BreakpointType::Memory;
+        } else {
+            throw InvalidParamsException("Invalid breakpoint type: " + typeStr);
         }
     }
-    
+
     auto& manager = BreakpointManager::Instance();
     bool success = manager.DeleteBreakpoint(address, typeFilter);
     
     if (!success) {
-        throw MCPException("Failed to delete breakpoint at: " + addressStr);
+        throw MCPException("Failed to delete breakpoint at: " + StringUtils::FormatAddress(address));
     }
     
     nlohmann::json result;
@@ -151,14 +205,13 @@ nlohmann::json BreakpointHandler::Enable(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    const uint64_t address = RequestValidator::GetAddress(params, "address");
     
     auto& manager = BreakpointManager::Instance();
     bool success = manager.EnableBreakpoint(address);
     
     if (!success) {
-        throw MCPException("Failed to enable breakpoint at: " + addressStr);
+        throw MCPException("Failed to enable breakpoint at: " + StringUtils::FormatAddress(address));
     }
     
     nlohmann::json result;
@@ -178,14 +231,13 @@ nlohmann::json BreakpointHandler::Disable(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    const uint64_t address = RequestValidator::GetAddress(params, "address");
     
     auto& manager = BreakpointManager::Instance();
     bool success = manager.DisableBreakpoint(address);
     
     if (!success) {
-        throw MCPException("Failed to disable breakpoint at: " + addressStr);
+        throw MCPException("Failed to disable breakpoint at: " + StringUtils::FormatAddress(address));
     }
     
     nlohmann::json result;
@@ -205,14 +257,13 @@ nlohmann::json BreakpointHandler::Toggle(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    const uint64_t address = RequestValidator::GetAddress(params, "address");
     
     auto& manager = BreakpointManager::Instance();
     bool success = manager.ToggleBreakpoint(address);
     
     if (!success) {
-        throw MCPException("Failed to toggle breakpoint at: " + addressStr);
+        throw MCPException("Failed to toggle breakpoint at: " + StringUtils::FormatAddress(address));
     }
     
     // 鑾峰彇褰撳墠鐘舵€?
@@ -237,9 +288,11 @@ nlohmann::json BreakpointHandler::List(const nlohmann::json& params) {
             typeFilter = BreakpointType::Hardware;
         } else if (typeStr == "memory") {
             typeFilter = BreakpointType::Memory;
+        } else {
+            throw InvalidParamsException("Invalid breakpoint type: " + typeStr);
         }
     }
-    
+
     auto& manager = BreakpointManager::Instance();
     auto breakpoints = manager.ListBreakpoints(typeFilter);
     
@@ -260,14 +313,13 @@ nlohmann::json BreakpointHandler::Get(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    const uint64_t address = RequestValidator::GetAddress(params, "address");
     
     auto& manager = BreakpointManager::Instance();
     auto bp = manager.GetBreakpoint(address);
     
     if (!bp.has_value()) {
-        throw InvalidAddressException("No breakpoint at address: " + addressStr);
+        throw InvalidAddressException("No breakpoint at address: " + StringUtils::FormatAddress(address));
     }
     
     return BreakpointInfoToJson(bp.value());
@@ -289,9 +341,11 @@ nlohmann::json BreakpointHandler::DeleteAll(const nlohmann::json& params) {
             typeFilter = BreakpointType::Hardware;
         } else if (typeStr == "memory") {
             typeFilter = BreakpointType::Memory;
+        } else {
+            throw InvalidParamsException("Invalid breakpoint type: " + typeStr);
         }
     }
-    
+
     auto& manager = BreakpointManager::Instance();
     size_t deletedCount = manager.DeleteAllBreakpoints(typeFilter);
     
@@ -319,15 +373,14 @@ nlohmann::json BreakpointHandler::SetCondition(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: condition");
     }
 
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    const uint64_t address = RequestValidator::GetAddress(params, "address");
     std::string condition = params["condition"].get<std::string>();
 
     auto& manager = BreakpointManager::Instance();
     bool success = manager.SetCondition(address, condition);
     
     if (!success) {
-        throw MCPException("Failed to set condition for breakpoint at: " + addressStr);
+        throw MCPException("Failed to set condition for breakpoint at: " + StringUtils::FormatAddress(address));
     }
     
     nlohmann::json result;
@@ -356,15 +409,14 @@ nlohmann::json BreakpointHandler::SetLog(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: log_text");
     }
 
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    const uint64_t address = RequestValidator::GetAddress(params, "address");
     std::string message = params["log_text"].get<std::string>();
 
     auto& manager = BreakpointManager::Instance();
     bool success = manager.SetLogBreakpoint(address, message);
     
     if (!success) {
-        throw MCPException("Failed to set log breakpoint at: " + addressStr);
+        throw MCPException("Failed to set log breakpoint at: " + StringUtils::FormatAddress(address));
     }
     
     nlohmann::json result;
@@ -385,14 +437,13 @@ nlohmann::json BreakpointHandler::ResetHitCount(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    const uint64_t address = RequestValidator::GetAddress(params, "address");
     
     auto& manager = BreakpointManager::Instance();
     bool success = manager.ResetHitCount(address);
     
     if (!success) {
-        throw MCPException("Failed to reset hit count for breakpoint at: " + addressStr);
+        throw MCPException("Failed to reset hit count for breakpoint at: " + StringUtils::FormatAddress(address));
     }
     
     nlohmann::json result;
@@ -432,6 +483,7 @@ nlohmann::json BreakpointHandler::BreakpointInfoToJson(const BreakpointInfo& bp)
             break;
         case BreakpointType::Memory:
             json["type"] = "memory";
+            json["mem_size"] = bp.memorySize;
             break;
     }
     

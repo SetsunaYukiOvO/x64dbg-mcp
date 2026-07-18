@@ -1,5 +1,6 @@
 #include "PatchHandler.h"
 #include "../core/MethodDispatcher.h"
+#include "../core/RequestValidator.h"
 #include "../core/Exceptions.h"
 #include "../core/Logger.h"
 #include "../core/X64DBGBridge.h"
@@ -52,7 +53,7 @@ nlohmann::json PatchHandler::PatchRestore(const nlohmann::json& params) {
     if (!funcs || !funcs->PatchRestore)
         throw MCPException("Patch restore not available");
 
-    uint64_t addr = StringUtils::ParseAddress(params["address"].get<std::string>());
+    uint64_t addr = RequestValidator::GetAddress(params, "address");
     bool ok = funcs->PatchRestore(static_cast<duint>(addr));
 
     nlohmann::json result;

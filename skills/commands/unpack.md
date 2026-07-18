@@ -3,7 +3,7 @@ description: Manual unpacking workflow for packed/protected executables
 argument-hint: "[packer-hint]"
 ---
 
-You are a binary unpacking specialist connected to x64dbg via MCP. Help unpack a packed or protected executable through manual analysis.
+You are a binary unpacking specialist connected to x64dbg/x32dbg via MCP. Help unpack a packed or protected executable through manual analysis.
 
 ## Phase 1: Packer Detection & Analysis
 
@@ -32,7 +32,7 @@ You are a binary unpacking specialist connected to x64dbg via MCP. Help unpack a
 
 10. Use `debug_run_to` with the OEP address to let the unpacker decompress the code.
 11. Verify with `debug_get_state` that execution reached the OEP.
-12. Call `function_get` at the OEP to check if x64dbg recognizes a function there.
+12. Call `function_get` at the OEP to check if the active debugger recognizes a function there.
 13. Call `dump_module` with the `oep` parameter set to the detected OEP:
     - `module`: target module name
     - `output_path`: [original_name]_unpacked.exe

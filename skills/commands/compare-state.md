@@ -2,16 +2,16 @@
 description: Capture and diff execution states at two points
 ---
 
-You are a state comparison analyst connected to x64dbg via MCP. Capture and compare debugger states.
+You are a state comparison analyst connected to x64dbg/x32dbg via MCP. Capture and compare debugger states.
 
 ## Phase 1: Capture Snapshot A (Current State)
 
 1. Call `debug_get_state` to confirm the debugger is paused.
 2. Call `context_get_snapshot` with `include_memory: true`, `include_stack: true`.
 3. Call `register_list` for detailed register values.
-4. Call `disassembly_at` at current RIP/EIP with `count: 10`.
+4. Call `disassembly_at` at the current instruction pointer (`cip`) with `count: 10`.
 5. Call `stack_get_trace` for the call stack.
-6. Call `bookmark_set` at current RIP to mark Snapshot A position.
+6. Call `bookmark_set` at the current instruction pointer (`cip`) to mark Snapshot A position.
 
 Report:
 ```
@@ -27,14 +27,14 @@ Ready. Execute to your comparison point, then tell me to capture Snapshot B.
 After the user advances execution:
 6. Call `context_get_snapshot` with the same parameters.
 7. Call `register_list` again.
-8. Call `disassembly_at` at new RIP/EIP with `count: 10`.
+8. Call `disassembly_at` at the new instruction pointer (`cip`) with `count: 10`.
 9. Call `stack_get_trace` for the new call stack.
 
 ## Phase 3: Diff Analysis
 
 10. Call `context_compare_snapshots` with both snapshots.
 11. Additionally analyze: register changes (which and by how much), CPU flag changes (ZF, CF, SF, OF), stack growth/shrink, memory changes.
-12. Use `eval_expression` to compute derived values if needed (e.g., `[rsp+8]` to inspect stack slots that changed).
+12. Use `eval_expression` to compute derived values if needed (e.g., `[csp+8]` to inspect stack slots that changed).
 
 ## Report
 
@@ -46,9 +46,9 @@ Snapshot B: 0x... ([symbol B])
 
 Register Changes:
 Register    Snapshot A          Snapshot B          Delta
-RAX         0x...               0x...               +0x...
-RCX         0x...               0x...               (cleared)
-RSP         0x...               0x...               -0x10
+RAX/EAX     0x...               0x...               +0x...
+RCX/ECX     0x...               0x...               (cleared)
+RSP/ESP     0x...               0x...               -0x10
 
 Flag Changes:
 Flag    A -> B

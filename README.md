@@ -25,7 +25,7 @@ A Model Context Protocol (MCP) server implementation for x64dbg and x32dbg, enab
   - Thread management (list, switch, suspend, resume)
   - Stack trace and analysis
   - **Dump & Analysis** (module dump, memory dump, packer detection, OEP detection)
-  - **Script execution** (execute x64dbg commands, batch operations)
+  - **Script execution** (execute x64dbg/x32dbg commands, batch operations)
   - **Context snapshots** (capture and compare debugging state)
   
 - **Resources - Context Providers (7 direct + 8 templates)**:
@@ -41,6 +41,15 @@ A Model Context Protocol (MCP) server implementation for x64dbg and x32dbg, enab
 
 - **Security**: Permission-based access control
 - **Extensible**: Plugin architecture for custom methods, resources, and prompts
+
+## What's New in v1.0.10
+
+- **Correct x32dbg register fields**: debugger state, thread, and stack responses now expose EIP/ESP/EBP instead of labeling 32-bit values as RIP/RSP/RBP (#14).
+- **Architecture boundary hardening**: malformed, overflowing, or architecture-incompatible addresses, ranges, and register values are rejected before SDK calls; stack bounds and address formatting are architecture-aware.
+- **Reliable breakpoint sizes**: hardware and memory breakpoint sizes now reach the native debugger commands and are verified after creation.
+- **Browser CORS support**: allowlisted origins receive `OPTIONS` preflight support and validated CORS headers across normal and streaming MCP endpoints (PR #18 by @abevol).
+- **Attach and skill compatibility fixes**: x64dbg PID attach no longer times out (PR #19 by @abevol), and all bundled skills load on Copilot CLI 1.0.65+ (PR #16 by @thejesh23).
+- **Build and test coverage**: stricter dual-architecture CMake validation plus 12 x64/x86 regression tests.
 
 ## What's New in v1.0.9
 
@@ -78,7 +87,7 @@ A Model Context Protocol (MCP) server implementation for x64dbg and x32dbg, enab
 ### v1.0.4
 
 - 12 new tools (66 → 78): `eval_expression`, `xref_get`, `function_list`/`function_get`, `module_get_exports`/`module_get_imports`, `assembler_assemble`, `bookmark_set`/`delete`/`list`, `patch_list`/`patch_restore`
-- Address parsing: all address params accept symbols, registers, and x64dbg expressions via DbgEval
+- Address parsing: all address params accept symbols, registers, and x64dbg/x32dbg expressions via DbgEval
 - `memory_search` continuous hex format support
 - Claude Code plugin (`skills/`) with 11 RE slash commands
 - All 10 MCP prompts rewritten with structured multi-phase workflows
@@ -103,7 +112,7 @@ For complete version history, see [CHANGELOG.md](CHANGELOG.md)
 
 ### Prerequisites
 
-- **Windows 10/11** (x64)
+- **Windows 10/11** (64-bit host; supports building both x64 and x86 plugins)
 - **CMake** 3.15 or higher
 - **Visual Studio 2022** with C++ Desktop Development workload
 - **vcpkg** - Package manager for C++ libraries
@@ -171,23 +180,27 @@ cd x64dbg-mcp
 3. **Configure with CMake**:
 ```powershell
 # For x64 build
-cmake -B build -G "Visual Studio 17 2022" -A x64 ^
+cmake -B build_x64 -G "Visual Studio 17 2022" -A x64 ^
     -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
+    -DVCPKG_TARGET_TRIPLET=x64-windows ^
     -DXDBG_ARCH=x64
 
 # For x86 build
-cmake -B build -G "Visual Studio 17 2022" -A Win32 ^
+cmake -B build_x86 -G "Visual Studio 17 2022" -A Win32 ^
     -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
+    -DVCPKG_TARGET_TRIPLET=x86-windows ^
     -DXDBG_ARCH=x86
 ```
 
 4. **Build**:
 ```powershell
-cmake --build build --config Release
+cmake --build build_x64 --config Release
+cmake --build build_x86 --config Release
 ```
 
 5. **Output**:
-- Plugin file: `build\bin\Release\x64dbg_mcp.dp64` (approximately 611 KB)
+- x64 plugin: `build_x64\bin\Release\x64dbg_mcp.dp64`
+- x86 plugin: `build_x86\bin\Release\x32dbg_mcp.dp32`
 
 ## Installation
 
@@ -223,7 +236,7 @@ copy config.json <x64dbg-path>\x32\plugins\x32dbg-mcp\
 
 ### Starting the Server
 
-1. Open x64dbg
+1. Open x64dbg for a 64-bit target or x32dbg for a 32-bit target
 2. Navigate to **Plugins → MCP Server → Start MCP HTTP Server**
 3. The server will start on the configured port (default: 3000)
 4. Access the server at `http://127.0.0.1:3000`
@@ -234,7 +247,7 @@ Edit `config.json` to customize settings:
 
 ```json
 {
-  "version": "1.0.9",
+  "version": "1.0.10",
   "server": {
     "address": "127.0.0.1",
     "port": 3000
@@ -417,7 +430,7 @@ Legacy HTTP+SSE clients (use the `/sse` path, not the root):
 ### Stack Operations
 - `stack.get_trace` - Get stack trace
 - `stack.read_frame` - Read stack frame
-- `stack.get_pointers` - Get stack pointers (RSP, RBP)
+- `stack.get_pointers` - Get stack pointers (RSP/RBP on x64, ESP/EBP on x86)
 - `stack.is_on_stack` - Check if address is on stack
 
 For complete method signatures and examples, see the inline documentation in the source code or use the `system.methods` API call.
@@ -449,15 +462,16 @@ The plugin is organized into four layers:
 ## Troubleshooting
 
 ### Plugin not loading
-- Ensure the plugin file is in the correct directory
-- Check x64dbg log for error messages
-- Verify x64dbg version compatibility (requires x64dbg build 2023+)
+- Match the plugin to the debugger: `x64dbg_mcp.dp64` in `x64\plugins\` for x64dbg, or `x32dbg_mcp.dp32` in `x32\plugins\` for x32dbg
+- Do not load a `.dp64` plugin in x32dbg or a `.dp32` plugin in x64dbg
+- Check the corresponding x64dbg/x32dbg log for error messages
+- Verify debugger version compatibility (requires x64dbg/x32dbg build 2023+)
 
 ### Server won't start
 - Check if port 3000 is already in use
 - Verify config.json is valid JSON
 - Check file permissions on the plugin directory
-- Review x64dbg log file for detailed error messages
+- Review the corresponding x64dbg/x32dbg log file for detailed error messages
 
 ### Connection refused
 - Ensure HTTP server is started via plugin menu ("Start MCP HTTP Server")

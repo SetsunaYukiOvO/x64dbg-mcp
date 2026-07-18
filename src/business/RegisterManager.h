@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
+#include "../core/TargetValueValidator.h"
 
 namespace MCP {
 
@@ -77,6 +78,10 @@ public:
      * @return 大小（字节）
      */
     size_t GetRegisterSize(const std::string& name) const;
+
+    static constexpr bool FitsRegisterValue(uint64_t value, size_t sizeBytes) noexcept {
+        return TargetValueValidator::FitsUnsignedValue(value, sizeBytes);
+    }
 
 private:
     RegisterManager();

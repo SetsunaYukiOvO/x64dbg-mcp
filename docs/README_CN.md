@@ -25,7 +25,7 @@
   - 线程管理（列出、切换、挂起、恢复）
   - 调用栈追踪与分析
   - **Dump 与分析**（模块 dump、内存 dump、加壳检测、OEP 检测）
-  - **脚本执行**（执行 x64dbg 命令、批量操作）
+  - **脚本执行**（执行 x64dbg/x32dbg 命令、批量操作）
   - **上下文快照**（捕获并比较调试状态）
 
 - **Resources - 上下文提供器（7 个直接资源 + 8 个模板）**：
@@ -41,6 +41,15 @@
 
 - **安全性**：基于权限的访问控制
 - **可扩展性**：支持自定义方法、资源与提示的插件架构
+
+## v1.0.10 更新内容
+
+- **x32dbg 寄存器字段修复**：调试器状态、线程和栈响应现在使用 EIP/ESP/EBP，不再将 32 位值标记为 RIP/RSP/RBP（#14）。
+- **架构边界加固**：格式错误、溢出或与目标架构不兼容的地址、区间和寄存器值会在 SDK 调用前被拒绝；栈边界和地址格式也改为架构感知。
+- **可靠的断点大小**：硬件断点和内存断点大小会传递到真实调试器命令，并在创建后回读验证。
+- **浏览器 CORS 支持**：白名单 Origin 可在普通和流式 MCP 端点使用 `OPTIONS` 预检及经验证的 CORS 响应头（PR #18，贡献者 @abevol）。
+- **Attach 与技能兼容修复**：x64dbg PID attach 不再超时（PR #19，贡献者 @abevol），所有附带技能可在 Copilot CLI 1.0.65+ 正常加载（PR #16，贡献者 @thejesh23）。
+- **构建与测试覆盖**：严格校验双架构 CMake 配置，并新增 12 个 x64/x86 回归测试。
 
 ## v1.0.9 更新内容
 
@@ -78,7 +87,7 @@
 ### v1.0.4
 
 - 新增 12 个工具（66 → 78）：`eval_expression`、`xref_get`、`function_list`/`function_get`、`module_get_exports`/`module_get_imports`、`assembler_assemble`、`bookmark_set`/`delete`/`list`、`patch_list`/`patch_restore`
-- 地址参数支持符号名、寄存器名和 x64dbg 表达式（DbgEval 回退）
+- 地址参数支持符号名、寄存器名和 x64dbg/x32dbg 表达式（DbgEval 回退）
 - `memory_search` 支持连续 hex 格式
 - Claude Code 插件（`skills/`）含 11 个逆向工程斜杠命令
 - 10 个 MCP 提示词模板重写为多阶段结构化工作流
@@ -92,7 +101,7 @@
 
 ### 前置要求
 
-- **Windows 10/11**（x64）
+- **Windows 10/11**（64 位主机，可构建 x64 与 x86 插件）
 - **CMake** 3.15 或更高
 - **Visual Studio 2022**（安装 C++ 桌面开发工作负载）
 - **vcpkg**（C++ 依赖包管理器）
@@ -160,23 +169,27 @@ cd x64dbg-mcp
 3. **配置 CMake**：
 ```powershell
 # x64 构建
-cmake -B build -G "Visual Studio 17 2022" -A x64 ^
+cmake -B build_x64 -G "Visual Studio 17 2022" -A x64 ^
     -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
+    -DVCPKG_TARGET_TRIPLET=x64-windows ^
     -DXDBG_ARCH=x64
 
 # x86 构建
-cmake -B build -G "Visual Studio 17 2022" -A Win32 ^
+cmake -B build_x86 -G "Visual Studio 17 2022" -A Win32 ^
     -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
+    -DVCPKG_TARGET_TRIPLET=x86-windows ^
     -DXDBG_ARCH=x86
 ```
 
 4. **构建**：
 ```powershell
-cmake --build build --config Release
+cmake --build build_x64 --config Release
+cmake --build build_x86 --config Release
 ```
 
 5. **输出**：
-- 插件文件：`build\bin\Release\x64dbg_mcp.dp64`（约 611 KB）
+- x64 插件：`build_x64\bin\Release\x64dbg_mcp.dp64`
+- x86 插件：`build_x86\bin\Release\x32dbg_mcp.dp32`
 
 ## 安装
 
@@ -212,7 +225,7 @@ copy config.json <x64dbg-path>\x32\plugins\x32dbg-mcp\
 
 ### 启动服务器
 
-1. 打开 x64dbg
+1. 64 位目标打开 x64dbg，32 位目标打开 x32dbg
 2. 进入 **Plugins -> MCP Server -> Start MCP HTTP Server**
 3. 服务器会在配置端口启动（默认：3000）
 4. 访问 `http://127.0.0.1:3000`
@@ -223,7 +236,7 @@ copy config.json <x64dbg-path>\x32\plugins\x32dbg-mcp\
 
 ```json
 {
-  "version": "1.0.9",
+  "version": "1.0.10",
   "server": {
     "address": "127.0.0.1",
     "port": 3000
@@ -406,7 +419,7 @@ Cursor 以及其他 MCP 客户端通常会根据 `initialize` 返回的 capabili
 ### 栈操作
 - `stack.get_trace` - 获取调用栈
 - `stack.read_frame` - 读取栈帧
-- `stack.get_pointers` - 获取栈指针（RSP、RBP）
+- `stack.get_pointers` - 获取栈指针（x64 为 RSP/RBP，x86 为 ESP/EBP）
 - `stack.is_on_stack` - 检查地址是否位于栈上
 
 完整方法签名与示例请查看源码内联文档，或调用 `system.methods` API。
@@ -438,15 +451,16 @@ Cursor 以及其他 MCP 客户端通常会根据 `initialize` 返回的 capabili
 ## 故障排查
 
 ### 插件未加载
-- 确认插件文件位于正确目录
-- 检查 x64dbg 日志中的错误信息
-- 验证 x64dbg 版本兼容性（要求 x64dbg build 2023+）
+- 确认插件与调试器匹配：x64dbg 使用 `x64\plugins\x64dbg_mcp.dp64`，x32dbg 使用 `x32\plugins\x32dbg_mcp.dp32`
+- 不要在 x32dbg 中加载 `.dp64`，也不要在 x64dbg 中加载 `.dp32`
+- 检查对应的 x64dbg/x32dbg 日志
+- 验证调试器版本兼容性（要求 x64dbg/x32dbg build 2023+）
 
 ### 服务器无法启动
 - 检查端口 3000 是否已被占用
 - 验证 config.json 是否为合法 JSON
 - 检查插件目录的文件权限
-- 查看 x64dbg 日志获取详细错误
+- 查看对应的 x64dbg/x32dbg 日志获取详细错误
 
 ### 连接被拒绝
 - 确保已通过插件菜单启动 HTTP 服务（"Start MCP HTTP Server"）

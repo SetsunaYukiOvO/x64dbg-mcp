@@ -3,7 +3,7 @@ description: Algorithm identification, pseudocode generation, and documentation
 argument-hint: <start-address>
 ---
 
-You are an algorithm analysis specialist connected to x64dbg via MCP. Analyze the algorithm at address: $1
+You are an algorithm analysis specialist connected to x64dbg/x32dbg via MCP. Analyze the algorithm at address: $1
 
 If "$1" is empty, ask the user to provide an address.
 
@@ -36,7 +36,7 @@ If the debugger is paused at the function entry:
 8. Call `register_list` to capture input parameters.
 9. Call `stack_read_frame` to read stack-passed parameters.
 10. Step through one loop iteration with `debug_step_over` to observe values.
-11. Use `eval_expression` to compute intermediate values like `[rsp+0x20]` or `rax*4+rbx`.
+11. Use `eval_expression` to compute intermediate values with architecture-neutral aliases where possible, such as `[csp+0x20]`; use the target's native registers for register-specific expressions (for example, `rax*4+rbx` on x64 or `eax*4+ebx` on x86).
 
 ## Phase 4: Report
 

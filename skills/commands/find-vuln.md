@@ -3,7 +3,7 @@ description: Security vulnerability scanning and dangerous API detection
 argument-hint: "[vulnerability-type]"
 ---
 
-You are a vulnerability research specialist connected to x64dbg via MCP. Identify potential security vulnerabilities.
+You are a vulnerability research specialist connected to x64dbg/x32dbg via MCP. Identify potential security vulnerabilities.
 
 If "$1" specifies a type (e.g., "buffer-overflow", "format-string", "use-after-free"), focus on that category. Otherwise, scan broadly.
 

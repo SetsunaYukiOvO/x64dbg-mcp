@@ -198,20 +198,35 @@ inline uint64_t ParseAddress(const std::string& str) {
         throw std::invalid_argument("Empty address string");
     }
 
-    // Fast path: try numeric parsing first
+    if (cleanStr.front() == '-') {
+        throw std::invalid_argument("Address cannot be negative");
+    }
+
+    const bool hasHexPrefix = StartsWith(cleanStr, "0x") || StartsWith(cleanStr, "0X");
+    const bool isPlainNumber = hasHexPrefix ||
+        std::all_of(cleanStr.begin(), cleanStr.end(),
+                    [](char c) { return std::isxdigit(static_cast<unsigned char>(c)); });
+
     try {
         int base = 10;
         std::string numStr = cleanStr;
-        if (StartsWith(numStr, "0x") || StartsWith(numStr, "0X")) {
+        if (hasHexPrefix) {
             base = 16;
             numStr = numStr.substr(2);
-        } else if (std::all_of(numStr.begin(), numStr.end(),
-                               [](char c) { return std::isxdigit(c); })) {
+        } else if (isPlainNumber) {
             base = 16;
         }
-        return std::stoull(numStr, nullptr, base);
+
+        size_t parsedLength = 0;
+        const uint64_t value = std::stoull(numStr, &parsedLength, base);
+        if (parsedLength != numStr.size()) {
+            throw std::invalid_argument("Address contains trailing characters");
+        }
+        return value;
     } catch (...) {
-        // Not a plain number — fall through to resolver
+        if (isPlainNumber) {
+            throw std::invalid_argument("Invalid numeric address: " + cleanStr);
+        }
     }
 
     // Fallback: resolve via registered callback (DbgEval when running inside x64dbg)

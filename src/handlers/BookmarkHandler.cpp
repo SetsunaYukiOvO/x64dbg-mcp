@@ -1,5 +1,6 @@
 #include "BookmarkHandler.h"
 #include "../core/MethodDispatcher.h"
+#include "../core/RequestValidator.h"
 #include "../core/Exceptions.h"
 #include "../core/Logger.h"
 #include "../core/X64DBGBridge.h"
@@ -20,7 +21,7 @@ nlohmann::json BookmarkHandler::Set(const nlohmann::json& params) {
     if (!params.contains("address"))
         throw InvalidParamsException("Missing required parameter: address");
 
-    uint64_t addr = StringUtils::ParseAddress(params["address"].get<std::string>());
+    uint64_t addr = RequestValidator::GetAddress(params, "address");
     bool ok = Script::Bookmark::Set(static_cast<duint>(addr), true);
 
     nlohmann::json result;
@@ -33,7 +34,7 @@ nlohmann::json BookmarkHandler::Delete(const nlohmann::json& params) {
     if (!params.contains("address"))
         throw InvalidParamsException("Missing required parameter: address");
 
-    uint64_t addr = StringUtils::ParseAddress(params["address"].get<std::string>());
+    uint64_t addr = RequestValidator::GetAddress(params, "address");
     bool ok = Script::Bookmark::Delete(static_cast<duint>(addr));
 
     nlohmann::json result;

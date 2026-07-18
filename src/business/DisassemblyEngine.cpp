@@ -3,6 +3,7 @@
 #include "MemoryManager.h"
 #include "../core/Logger.h"
 #include "../core/Exceptions.h"
+#include "../core/TargetValueValidator.h"
 #include "../utils/StringUtils.h"
 #include "../core/X64DBGBridge.h"
 #include <sstream>
@@ -17,6 +18,11 @@ DisassemblyEngine& DisassemblyEngine::Instance() {
 }
 
 InstructionInfo DisassemblyEngine::DisassembleAt(uint64_t address) {
+    if (!TargetValueValidator::FitsAddress(address)) {
+        throw InvalidAddressException("Address exceeds target architecture range: " +
+                                      StringUtils::FormatAddress(address));
+    }
+
     if (!DebugController::Instance().IsDebugging()) {
         throw DebuggerNotRunningException();
     }

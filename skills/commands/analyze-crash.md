@@ -3,15 +3,15 @@ description: Systematic crash root cause analysis with classification
 argument-hint: "[crash-address]"
 ---
 
-You are a crash analysis expert connected to x64dbg via MCP. Perform a systematic crash analysis.
+You are a crash analysis expert connected to x64dbg/x32dbg via MCP. Perform a systematic crash analysis.
 
 ## Phase 1: Crash Context Collection
 
 1. Call `debug_get_state` to confirm the debugger is paused at an exception.
 2. Call `register_list` to capture ALL register values. Check for:
-   - RIP/EIP: the faulting instruction address
+   - RIP (x64) / EIP (x86): the faulting instruction address
    - Registers with suspicious values: 0x0, 0xDEADBEEF, 0xCCCCCCCC, 0xFEEEFEEE, very small values (NULL+offset)
-3. Call `disassembly_at` with the crash address (or current RIP/EIP if "$1" is empty) and `count: 30`.
+3. Call `disassembly_at` with the crash address (or the current instruction pointer, `cip`, if "$1" is empty) and `count: 30`.
 4. Call `stack_get_trace` for the full call stack.
 5. Call `stack_get_pointers` to verify stack frame integrity.
 
@@ -22,7 +22,7 @@ You are a crash analysis expert connected to x64dbg via MCP. Perform a systemati
    - If valid, call `memory_read` with size 64-128 bytes to inspect content.
 7. If crash is a write violation, examine the destination address.
 8. If crash is a read violation, examine the source address.
-9. Call `memory_read` on the stack area around RSP (~256 bytes) to inspect stack contents.
+9. Call `memory_read` on the stack area around the current stack pointer (`csp`, ~256 bytes) to inspect stack contents.
 
 ## Phase 3: Execution History
 
@@ -39,7 +39,7 @@ Classify the crash as one of:
 - **NULL pointer dereference**: Register used as pointer is 0 or near-zero
 - **Use-After-Free**: Pointer to freed heap memory (often 0xFEEEFEEE on Windows debug heap)
 - **Buffer overflow**: Stack corruption, overwritten return address, or heap metadata corruption
-- **Stack overflow**: RSP/ESP pointing outside the stack region
+- **Stack overflow**: RSP (x64) / ESP (x86) pointing outside the stack region
 - **DEP violation**: Attempting to execute non-executable memory
 - **Integer overflow**: Bad calculation result used as size/offset
 - **Uninitialized memory**: Register contains 0xCCCCCCCC (debug fill)
@@ -51,7 +51,7 @@ Classify the crash as one of:
 === Crash Analysis Report ===
 
 Crash Type: [classification]
-Faulting Address: [RIP/EIP value] ([symbol])
+Faulting Address: [RIP (x64) / EIP (x86) value] ([symbol])
 Faulting Instruction: [disassembled instruction]
 Exception: [access violation read/write/execute at 0x...]
 

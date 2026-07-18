@@ -2,6 +2,7 @@
 #include "DebugController.h"
 #include "../core/Logger.h"
 #include "../core/Exceptions.h"
+#include "../core/TargetValueValidator.h"
 #include "../utils/StringUtils.h"
 #include "../core/X64DBGBridge.h"
 #include <algorithm>
@@ -14,22 +15,32 @@ MemoryManager& MemoryManager::Instance() {
 }
 
 std::vector<uint8_t> MemoryManager::Read(uint64_t address, size_t size) {
+    if (!TargetValueValidator::FitsAddress(address)) {
+        throw InvalidAddressException("Address exceeds target architecture range: " +
+                                      StringUtils::FormatAddress(address));
+    }
+
     // Reading memory uses ReadProcessMemory under the hood, which works on
     // a running debuggee. Requiring only IsDebugging() matches x64dbg GUI
     // behavior (Memory Map / Dump panes remain usable while running).
     if (!DebugController::Instance().IsDebugging()) {
         throw DebuggerNotPausedException();
     }
-    
+
     if (size == 0) {
         throw InvalidSizeException("Size cannot be zero");
     }
-    
+
     if (size > MAX_READ_SIZE) {
-        throw InvalidSizeException("Read size exceeds maximum: " + 
+        throw InvalidSizeException("Read size exceeds maximum: " +
                                   std::to_string(MAX_READ_SIZE));
     }
-    
+
+    if (!TargetValueValidator::FitsAddressRange(address, size)) {
+        throw InvalidAddressException("Memory range exceeds target architecture range: " +
+                                      StringUtils::FormatAddress(address));
+    }
+
     // 检查起始地址是否可读
     if (!DbgMemIsValidReadPtr(address)) {
         throw InvalidAddressException("Memory not readable at address: " +
@@ -83,6 +94,11 @@ std::vector<uint8_t> MemoryManager::Read(uint64_t address, size_t size) {
 }
 
 size_t MemoryManager::Write(uint64_t address, const std::vector<uint8_t>& data) {
+    if (!TargetValueValidator::FitsAddress(address)) {
+        throw InvalidAddressException("Address exceeds target architecture range: " +
+                                      StringUtils::FormatAddress(address));
+    }
+
     if (!DebugController::Instance().IsPaused()) {
         throw DebuggerNotPausedException();
     }
@@ -95,7 +111,12 @@ size_t MemoryManager::Write(uint64_t address, const std::vector<uint8_t>& data) 
         throw InvalidSizeException("Write size exceeds maximum: " +
                                   std::to_string(MAX_WRITE_SIZE));
     }
-    
+
+    if (!TargetValueValidator::FitsAddressRange(address, data.size())) {
+        throw InvalidAddressException("Memory range exceeds target architecture range: " +
+                                      StringUtils::FormatAddress(address));
+    }
+
     if (!IsWritable(address, data.size())) {
         throw InvalidAddressException("Memory not writable at address: " +
                                      StringUtils::FormatAddress(address));
@@ -116,6 +137,11 @@ std::vector<MemorySearchResult> MemoryManager::Search(
     uint64_t endAddress,
     size_t maxResults)
 {
+    if (!TargetValueValidator::FitsAddress(startAddress) ||
+        !TargetValueValidator::FitsAddress(endAddress)) {
+        throw InvalidAddressException("Memory search range exceeds target architecture range");
+    }
+
     // Search is read-only memory traversal — same rationale as Read():
     // does not require the debuggee to be paused.
     if (!DebugController::Instance().IsDebugging()) {
@@ -258,6 +284,11 @@ std::vector<MemorySearchResult> MemoryManager::Search(
 }
 
 std::optional<MemoryRegion> MemoryManager::GetMemoryInfo(uint64_t address) {
+    if (!TargetValueValidator::FitsAddress(address)) {
+        throw InvalidAddressException("Address exceeds target architecture range: " +
+                                      StringUtils::FormatAddress(address));
+    }
+
     if (!DebugController::Instance().IsDebugging()) {
         throw DebuggerNotRunningException();
     }
@@ -375,6 +406,10 @@ std::vector<MemoryRegion> MemoryManager::EnumerateRegions() {
 }
 
 bool MemoryManager::IsReadable(uint64_t address, size_t size) {
+    if (!TargetValueValidator::FitsAddressRange(address, size)) {
+        return false;
+    }
+
     // 检查起始地址是否可读
     if (!DbgMemIsValidReadPtr(address)) {
         return false;
@@ -392,6 +427,10 @@ bool MemoryManager::IsReadable(uint64_t address, size_t size) {
 }
 
 bool MemoryManager::IsWritable(uint64_t address, size_t size) {
+    if (!TargetValueValidator::FitsAddressRange(address, size)) {
+        return false;
+    }
+
     auto info = GetMemoryInfo(address);
     if (!info.has_value()) {
         return false;
@@ -450,6 +489,11 @@ uint64_t MemoryManager::Allocate(size_t size) {
 }
 
 bool MemoryManager::Free(uint64_t address) {
+    if (!TargetValueValidator::FitsAddress(address)) {
+        throw InvalidAddressException("Address exceeds target architecture range: " +
+                                      StringUtils::FormatAddress(address));
+    }
+
     if (!DebugController::Instance().IsDebugging()) {
         throw DebuggerNotRunningException();
     }

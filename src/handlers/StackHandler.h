@@ -35,7 +35,7 @@ public:
      * @brief 获取栈指针信息
      * Method: stack.get_pointers
      * Params: {}
-     * Returns: { "rsp": "0x...", "rbp": "0x...", "on_stack": true }
+     * Returns architecture-specific stack/base pointer fields ("rsp"/"rbp" or "esp"/"ebp").
      */
     static nlohmann::json GetStackPointers(const nlohmann::json& params);
     

@@ -3,7 +3,7 @@ description: Comprehensive function tracing with parameter and return value moni
 argument-hint: <function-name-or-address>
 ---
 
-You are a function analysis specialist connected to x64dbg via MCP. Trace and understand the behavior of: $1
+You are a function analysis specialist connected to x64dbg/x32dbg via MCP. Trace and understand the behavior of: $1
 
 If "$1" is empty, ask the user to provide a function name or address.
 
@@ -34,8 +34,9 @@ If "$1" is empty, ask the user to provide a function name or address.
 8. Call `breakpoint_set_log` at entry with format:
    - x64: `"ENTER $1 | RCX={RCX} RDX={RDX} R8={R8} R9={R9}"`
    - x86: `"ENTER $1 | [ESP+4]={[ESP+4]:x} [ESP+8]={[ESP+8]:x}"`
-9. For each RET instruction, set a logging breakpoint:
-   - `"EXIT $1 | RAX={RAX}"`
+9. For each RET instruction, set an architecture-specific logging breakpoint:
+   - x64: `"EXIT $1 | RAX={RAX}"`
+   - x86: `"EXIT $1 | EAX={EAX}"`
 10. For key CALL sites, set additional logging breakpoints.
 
 ## Phase 4: Dynamic Capture
@@ -55,8 +56,8 @@ Module:   [owning module]
 Convention: [fastcall/stdcall/cdecl]
 
 Parameters (estimated):
-  - Param 1 (RCX/[ESP+4]): [type and description]
-  - Param 2 (RDX/[ESP+8]): [type and description]
+  - Param 1 (x64 RCX / x86 [ESP+4]): [type and description]
+  - Param 2 (x64 RDX / x86 [ESP+8]): [type and description]
 
 Internal Calls:
   1. 0x... -> [symbol] (at offset +0x...)

@@ -3,6 +3,7 @@
 #include "../business/SymbolResolver.h"
 #include "../core/MethodDispatcher.h"
 #include "../core/PermissionChecker.h"
+#include "../core/RequestValidator.h"
 #include "../core/Exceptions.h"
 #include "../utils/StringUtils.h"
 
@@ -23,8 +24,7 @@ nlohmann::json DisassemblyHandler::At(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     size_t count = params.value("count", 10);
     
     auto& engine = DisassemblyEngine::Instance();
@@ -65,8 +65,8 @@ nlohmann::json DisassemblyHandler::Range(const nlohmann::json& params) {
             throw InvalidParamsException("Missing required parameter: end");
         }
 
-        startAddress = StringUtils::ParseAddress(params["start"].get<std::string>());
-        endAddress = StringUtils::ParseAddress(params["end"].get<std::string>());
+        startAddress = RequestValidator::GetAddress(params, "start");
+        endAddress = RequestValidator::GetAddress(params, "end");
         if (endAddress <= startAddress) {
             throw InvalidParamsException("Invalid disassembly range: end must be greater than start");
         }
@@ -91,8 +91,7 @@ nlohmann::json DisassemblyHandler::Range(const nlohmann::json& params) {
             throw InvalidParamsException("Missing required parameter: count");
         }
 
-        std::string addressStr = params["address"].get<std::string>();
-        startAddress = StringUtils::ParseAddress(addressStr);
+        startAddress = RequestValidator::GetAddress(params, "address");
         size_t count = params["count"].get<size_t>();
         instructions = engine.DisassembleRange(startAddress, count);
         if (!instructions.empty()) {
@@ -122,8 +121,7 @@ nlohmann::json DisassemblyHandler::Function(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     
     auto& engine = DisassemblyEngine::Instance();
     auto& resolver = SymbolResolver::Instance();
@@ -237,8 +235,7 @@ nlohmann::json SymbolHandler::FromAddress(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     bool includeOffset = params.value("include_offset", true);
     
     auto& resolver = SymbolResolver::Instance();
@@ -336,15 +333,15 @@ nlohmann::json SymbolHandler::SetLabel(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: label");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     std::string label = params["label"].get<std::string>();
     
     auto& resolver = SymbolResolver::Instance();
     bool success = resolver.SetLabel(address, label);
     
     if (!success) {
-        throw MCPException("Failed to set label at: " + addressStr);
+        throw MCPException("Failed to set label at: " +
+                           StringUtils::FormatAddress(address));
     }
     
     nlohmann::json result;
@@ -368,15 +365,15 @@ nlohmann::json SymbolHandler::SetComment(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: comment");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     std::string comment = params["comment"].get<std::string>();
     
     auto& resolver = SymbolResolver::Instance();
     bool success = resolver.SetComment(address, comment);
     
     if (!success) {
-        throw MCPException("Failed to set comment at: " + addressStr);
+        throw MCPException("Failed to set comment at: " +
+                           StringUtils::FormatAddress(address));
     }
     
     nlohmann::json result;
@@ -392,8 +389,7 @@ nlohmann::json SymbolHandler::GetComment(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     
     auto& resolver = SymbolResolver::Instance();
     auto comment = resolver.GetComment(address);

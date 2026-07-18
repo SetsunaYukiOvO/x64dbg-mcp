@@ -27,7 +27,7 @@ public:
      * @brief 获取当前线程信息
      * Method: thread.get_current
      * Params: {}
-     * Returns: { "id", "name", "entry", "rip", ... }
+     * Returns an architecture-specific instruction pointer field ("rip" or "eip").
      */
     static nlohmann::json GetCurrentThread(const nlohmann::json& params);
     

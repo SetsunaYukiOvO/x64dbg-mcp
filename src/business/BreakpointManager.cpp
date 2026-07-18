@@ -4,6 +4,8 @@
 #include "../core/Exceptions.h"
 #include "../utils/StringUtils.h"
 #include "../core/X64DBGBridge.h"
+#include <limits>
+#include <sstream>
 
 #ifdef XDBG_SDK_AVAILABLE
 #include "_scriptapi_debug.h"
@@ -14,6 +16,74 @@ const DBGFUNCTIONS* SafeDbgFunctions() {
     const auto* f = DbgFunctions();
     if (!f) throw MCP::MCPException("x64dbg SDK functions not available");
     return f;
+}
+
+const char* HardwareConditionCommand(MCP::HardwareBreakpointCondition condition) {
+    switch (condition) {
+        case MCP::HardwareBreakpointCondition::Execute:
+            return "x";
+        case MCP::HardwareBreakpointCondition::Write:
+            return "w";
+        case MCP::HardwareBreakpointCondition::ReadWrite:
+            return "r";
+    }
+    throw MCP::InvalidParamsException("Invalid hardware breakpoint condition");
+}
+
+bool DeleteMemoryBreakpointAt(uint64_t address) {
+    std::ostringstream command;
+    command << "bpmc 0x" << std::hex << std::uppercase << address;
+    return DbgCmdExecDirect(command.str().c_str());
+}
+
+BPHWTYPE ToSdkHardwareType(MCP::HardwareBreakpointCondition condition) {
+    switch (condition) {
+        case MCP::HardwareBreakpointCondition::Execute:
+            return hw_execute;
+        case MCP::HardwareBreakpointCondition::Write:
+            return hw_write;
+        case MCP::HardwareBreakpointCondition::ReadWrite:
+            return hw_access;
+    }
+    throw MCP::InvalidParamsException("Invalid hardware breakpoint condition");
+}
+
+BPHWSIZE ToSdkHardwareSize(MCP::HardwareBreakpointSize size) {
+    switch (size) {
+        case MCP::HardwareBreakpointSize::Byte1:
+            return hw_byte;
+        case MCP::HardwareBreakpointSize::Byte2:
+            return hw_word;
+        case MCP::HardwareBreakpointSize::Byte4:
+            return hw_dword;
+        case MCP::HardwareBreakpointSize::Byte8:
+            return hw_qword;
+    }
+    throw MCP::InvalidParamsException("Invalid hardware breakpoint size");
+}
+
+bool HardwareBreakpointMatches(
+    duint address,
+    MCP::HardwareBreakpointCondition condition,
+    MCP::HardwareBreakpointSize size)
+{
+    BP_REF reference{};
+    if (!SafeDbgFunctions()->BpRefVa(&reference, bp_hardware, address)) {
+        return false;
+    }
+
+    duint actualType = 0;
+    duint actualSize = 0;
+    return SafeDbgFunctions()->BpGetFieldNumber(&reference, bpf_typeex, &actualType) &&
+           SafeDbgFunctions()->BpGetFieldNumber(&reference, bpf_hwsize, &actualSize) &&
+           actualType == static_cast<duint>(ToSdkHardwareType(condition)) &&
+           actualSize == static_cast<duint>(ToSdkHardwareSize(size));
+}
+
+bool MemoryBreakpointMatches(duint address, size_t size) {
+    return (DbgGetBpxTypeAt(address) & bp_memory) != 0 &&
+           SafeDbgFunctions()->MemBpSize &&
+           SafeDbgFunctions()->MemBpSize(address) == static_cast<duint>(size);
 }
 } // namespace
 
@@ -55,27 +125,42 @@ bool BreakpointManager::SetHardwareBreakpoint(
         throw DebuggerNotRunningException();
     }
     
-    Logger::Debug("Setting hardware breakpoint at 0x{:X}, condition: {}, size: {}", 
-                  address, 
+    const auto sizeBytes = static_cast<uint64_t>(size);
+    if (!IsHardwareBreakpointSizeSupported(size)) {
+        throw InvalidParamsException("Unsupported hardware breakpoint size for this architecture");
+    }
+    if (!IsHardwareBreakpointRequestValid(
+            address,
+            condition,
+            size,
+            std::numeric_limits<duint>::max())) {
+        if (address > std::numeric_limits<duint>::max()) {
+            throw InvalidParamsException("Hardware breakpoint address exceeds the target address space");
+        }
+        if (condition == HardwareBreakpointCondition::Execute) {
+            throw InvalidParamsException("Execute hardware breakpoints must use a size of 1 byte");
+        }
+        throw InvalidParamsException("Hardware breakpoint address must be aligned to its size");
+    }
+    const duint targetAddress = static_cast<duint>(address);
+
+    Logger::Debug("Setting hardware breakpoint at 0x{:X}, condition: {}, size: {}",
+                  address,
                   HardwareConditionToString(condition),
                   static_cast<int>(size));
-    
-    // 将条件转换为 x64dbg 的格式
-    Script::Debug::HardwareType hwType = Script::Debug::HardwareExecute;
-    switch (condition) {
-        case HardwareBreakpointCondition::Execute:
-            hwType = Script::Debug::HardwareExecute;
-            break;
-        case HardwareBreakpointCondition::Write:
-            hwType = Script::Debug::HardwareWrite;
-            break;
-        case HardwareBreakpointCondition::ReadWrite:
-            hwType = Script::Debug::HardwareAccess;
-            break;
-    }
-    
-    if (!Script::Debug::SetHardwareBreakpoint(address, hwType)) {
+
+    std::ostringstream command;
+    command << "bphws 0x" << std::hex << std::uppercase << address
+            << ", " << HardwareConditionCommand(condition)
+            << ", " << std::dec << sizeBytes;
+    const bool commandSucceeded = DbgCmdExecDirect(command.str().c_str());
+    if (!commandSucceeded) {
         Logger::Error("Failed to set hardware breakpoint at 0x{:X}", address);
+        return false;
+    }
+    if (!HardwareBreakpointMatches(targetAddress, condition, size)) {
+        Script::Debug::DeleteHardwareBreakpoint(targetAddress);
+        Logger::Error("Hardware breakpoint at 0x{:X} did not match the requested condition and size", address);
         return false;
     }
     
@@ -92,12 +177,30 @@ bool BreakpointManager::SetMemoryBreakpoint(uint64_t address, size_t size, const
         throw DebuggerNotRunningException();
     }
     
+    if (size == 0 || size > std::numeric_limits<duint>::max()) {
+        throw InvalidParamsException("Memory breakpoint size must fit the target architecture and be greater than zero");
+    }
+    if (address > std::numeric_limits<duint>::max()) {
+        throw InvalidParamsException("Memory breakpoint address exceeds the target address space");
+    }
+    if (address > std::numeric_limits<duint>::max() - (size - 1)) {
+        throw InvalidParamsException("Memory breakpoint range exceeds the target address space");
+    }
+    const duint targetAddress = static_cast<duint>(address);
+
     Logger::Debug("Setting memory breakpoint at 0x{:X}, size: {}", address, size);
-    
-    // x64dbg SDK doesn't have dedicated memory breakpoint API
-    // Use hardware breakpoint with write access as a workaround
-    if (!Script::Debug::SetHardwareBreakpoint(address, Script::Debug::HardwareWrite)) {
+
+    std::ostringstream command;
+    command << "bpmrange 0x" << std::hex << std::uppercase << address
+            << ", 0x" << size << ", a";
+    const bool commandSucceeded = DbgCmdExecDirect(command.str().c_str());
+    if (!commandSucceeded) {
         Logger::Error("Failed to set memory breakpoint at 0x{:X}", address);
+        return false;
+    }
+    if (!MemoryBreakpointMatches(targetAddress, size)) {
+        DeleteMemoryBreakpointAt(targetAddress);
+        Logger::Error("Memory breakpoint at 0x{:X} did not match the requested size", address);
         return false;
     }
     
@@ -168,9 +271,14 @@ bool BreakpointManager::DeleteBreakpoint(uint64_t address, std::optional<Breakpo
             softDeleted = Script::Debug::DeleteBreakpoint(address);
             if (softDeleted) deletedType += "software ";
         }
-        if (existingType & (bp_hardware | bp_memory)) {
+        if (existingType & bp_hardware) {
             hardDeleted = Script::Debug::DeleteHardwareBreakpoint(address);
-            if (hardDeleted) deletedType += "hardware/memory ";
+            if (hardDeleted) deletedType += "hardware ";
+        }
+        if (existingType & bp_memory) {
+            const bool memoryDeleted = DeleteMemoryBreakpointAt(address);
+            hardDeleted = hardDeleted || memoryDeleted;
+            if (memoryDeleted) deletedType += "memory ";
         }
         
         success = softDeleted || hardDeleted;
@@ -203,7 +311,7 @@ bool BreakpointManager::DeleteBreakpoint(uint64_t address, std::optional<Breakpo
                         StringUtils::FormatAddress(address)
                     );
                 }
-                success = Script::Debug::DeleteHardwareBreakpoint(address);
+                success = DeleteMemoryBreakpointAt(address);
                 deletedType = "memory";
                 break;
         }
@@ -275,7 +383,7 @@ std::optional<BreakpointInfo> BreakpointManager::GetBreakpoint(uint64_t address)
         return std::nullopt;
     }
     
-    BreakpointInfo info;
+    BreakpointInfo info{};
     info.address = address;
     info.hitCount = GetHitCount(address);
     info.module = GetModuleName(address);
@@ -293,6 +401,9 @@ std::optional<BreakpointInfo> BreakpointManager::GetBreakpoint(uint64_t address)
     } else if (bpType & bp_memory) {
         info.type = BreakpointType::Memory;
         type = bp_memory;
+        if (SafeDbgFunctions()->MemBpSize) {
+            info.memorySize = static_cast<size_t>(SafeDbgFunctions()->MemBpSize(address));
+        }
     }
     
     // 从 x64dbg 获取断点启用状态
@@ -307,6 +418,33 @@ std::optional<BreakpointInfo> BreakpointManager::GetBreakpoint(uint64_t address)
             info.enabled = true; // 默认为启用
         }
         
+        if (info.type == BreakpointType::Hardware) {
+            duint typeEx = 0;
+            if (SafeDbgFunctions()->BpGetFieldNumber(&bpRef, bpf_typeex, &typeEx)) {
+                switch (static_cast<BPHWTYPE>(typeEx)) {
+                    case hw_access:
+                        info.condition = HardwareBreakpointCondition::ReadWrite;
+                        break;
+                    case hw_write:
+                        info.condition = HardwareBreakpointCondition::Write;
+                        break;
+                    case hw_execute:
+                        info.condition = HardwareBreakpointCondition::Execute;
+                        break;
+                }
+            }
+
+            duint hwSize = 0;
+            if (SafeDbgFunctions()->BpGetFieldNumber(&bpRef, bpf_hwsize, &hwSize)) {
+                switch (static_cast<BPHWSIZE>(hwSize)) {
+                    case hw_byte: info.size = HardwareBreakpointSize::Byte1; break;
+                    case hw_word: info.size = HardwareBreakpointSize::Byte2; break;
+                    case hw_dword: info.size = HardwareBreakpointSize::Byte4; break;
+                    case hw_qword: info.size = HardwareBreakpointSize::Byte8; break;
+                }
+            }
+        }
+
         // 获取日志断点信息
         std::string logText;
         if (SafeDbgFunctions()->BpGetFieldText(&bpRef, bpf_logtext, 
@@ -367,7 +505,7 @@ std::vector<BreakpointInfo> BreakpointManager::ListBreakpoints(std::optional<Bre
             }
 
             // 转换为 BreakpointInfo
-            BreakpointInfo info;
+            BreakpointInfo info{};
             info.address = bp.addr;
             info.enabled = bp.enabled;
             info.name = bp.name;
@@ -378,40 +516,41 @@ std::vector<BreakpointInfo> BreakpointManager::ListBreakpoints(std::optional<Bre
             } else if (bp.type == bp_hardware) {
                 info.type = BreakpointType::Hardware;
 
-                // 硬件断点详细信息
-                switch (bp.typeEx) {
-                    case 0: // BPHWEXEC
-                        info.condition = HardwareBreakpointCondition::Execute;
+                switch (static_cast<BPHWTYPE>(bp.typeEx)) {
+                    case hw_access:
+                        info.condition = HardwareBreakpointCondition::ReadWrite;
                         break;
-                    case 1: // BPHWWRITE
+                    case hw_write:
                         info.condition = HardwareBreakpointCondition::Write;
                         break;
-                    case 3: // BPHWACCESS
-                        info.condition = HardwareBreakpointCondition::ReadWrite;
+                    case hw_execute:
+                        info.condition = HardwareBreakpointCondition::Execute;
                         break;
                 }
 
-                // 硬件断点大小
-                switch (bp.hwSize) {
-                    case 0: info.size = HardwareBreakpointSize::Byte1; break;
-                    case 1: info.size = HardwareBreakpointSize::Byte2; break;
-                    case 2: info.size = HardwareBreakpointSize::Byte4; break;
-                    case 3: info.size = HardwareBreakpointSize::Byte8; break;
+                switch (static_cast<BPHWSIZE>(bp.hwSize)) {
+                    case hw_byte: info.size = HardwareBreakpointSize::Byte1; break;
+                    case hw_word: info.size = HardwareBreakpointSize::Byte2; break;
+                    case hw_dword: info.size = HardwareBreakpointSize::Byte4; break;
+                    case hw_qword: info.size = HardwareBreakpointSize::Byte8; break;
                 }
             } else if (bp.type == bp_memory) {
                 info.type = BreakpointType::Memory;
 
-                // 内存断点详细信息（使用 typeEx 判断访问类型）
-                switch (bp.typeEx) {
-                    case 0: // Read
+                switch (static_cast<BPMEMTYPE>(bp.typeEx)) {
+                    case mem_access:
+                    case mem_read:
                         info.condition = HardwareBreakpointCondition::ReadWrite;
                         break;
-                    case 1: // Write
+                    case mem_write:
                         info.condition = HardwareBreakpointCondition::Write;
                         break;
-                    case 2: // Execute
+                    case mem_execute:
                         info.condition = HardwareBreakpointCondition::Execute;
                         break;
+                }
+                if (SafeDbgFunctions()->MemBpSize) {
+                    info.memorySize = static_cast<size_t>(SafeDbgFunctions()->MemBpSize(bp.addr));
                 }
             }
             

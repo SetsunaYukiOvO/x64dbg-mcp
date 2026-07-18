@@ -1,5 +1,6 @@
 #include "ThreadHandler.h"
 #include "../business/ThreadManager.h"
+#include "../core/ArchitectureRegisterNames.h"
 #include "../core/Exceptions.h"
 #include "../core/Logger.h"
 #include "../core/MethodDispatcher.h"
@@ -177,9 +178,9 @@ nlohmann::json ThreadHandler::FormatThreadInfo(const ThreadInfo& info) {
     j["priority"] = info.priority;
     
     // Include register context when available.
-    j["rip"] = StringUtils::FormatAddress(info.rip);
-    j["rsp"] = StringUtils::FormatAddress(info.rsp);
-    j["rbp"] = StringUtils::FormatAddress(info.rbp);
+    j[ArchitectureRegisterNames::InstructionPointer] = StringUtils::FormatAddress(info.rip);
+    j[ArchitectureRegisterNames::StackPointer] = StringUtils::FormatAddress(info.rsp);
+    j[ArchitectureRegisterNames::BasePointer] = StringUtils::FormatAddress(info.rbp);
     
     return j;
 }

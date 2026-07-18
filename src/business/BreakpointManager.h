@@ -1,9 +1,10 @@
 #pragma once
-#include <string>
-#include <vector>
+#include <cstdint>
+#include <limits>
 #include <map>
 #include <optional>
-#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace MCP {
 
@@ -35,6 +36,34 @@ enum class HardwareBreakpointSize {
     Byte8 = 8
 };
 
+constexpr bool IsHardwareBreakpointSizeSupported(HardwareBreakpointSize size) {
+    switch (size) {
+        case HardwareBreakpointSize::Byte1:
+        case HardwareBreakpointSize::Byte2:
+        case HardwareBreakpointSize::Byte4:
+            return true;
+        case HardwareBreakpointSize::Byte8:
+#ifdef XDBG_ARCH_X64
+            return true;
+#else
+            return false;
+#endif
+    }
+    return false;
+}
+
+constexpr bool IsHardwareBreakpointRequestValid(
+    uint64_t address,
+    HardwareBreakpointCondition condition,
+    HardwareBreakpointSize size,
+    uint64_t maximumAddress = std::numeric_limits<uint64_t>::max())
+{
+    return address <= maximumAddress &&
+           IsHardwareBreakpointSizeSupported(size) &&
+           (condition != HardwareBreakpointCondition::Execute || size == HardwareBreakpointSize::Byte1) &&
+           address % static_cast<uint64_t>(size) == 0;
+}
+
 /**
  * @brief 断点信息
  */
@@ -49,6 +78,7 @@ struct BreakpointInfo {
     // 硬件断点特有属性
     HardwareBreakpointCondition condition;
     HardwareBreakpointSize size;
+    size_t memorySize;
     
     // 条件断点
     std::string condition_expr;  // 条件表达式

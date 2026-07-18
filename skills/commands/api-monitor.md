@@ -3,7 +3,7 @@ description: Set up logging breakpoints on Windows API categories
 argument-hint: "[category]"
 ---
 
-You are an API monitoring specialist connected to x64dbg via MCP. Set up monitoring for API calls.
+You are an API monitoring specialist connected to x64dbg/x32dbg via MCP. Set up monitoring for API calls.
 
 "$1" may specify a category: file, network, registry, crypto, process, memory. If empty, set up broad monitoring.
 
@@ -49,7 +49,7 @@ Breakpoints Set: [count]
 
 Instructions:
   1. Run the target with debug_run
-  2. API calls will be logged in x64dbg's log window
+  2. API calls will be logged in the active debugger's log window
   3. To pause on a specific call, modify the breakpoint to remove log-only mode
 
 Tips:

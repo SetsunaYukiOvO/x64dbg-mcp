@@ -7,16 +7,33 @@ x64dbg MCP Server Plugin 的所有重要变更都会记录在此文件中。
 
 ## [Unreleased]
 
+## [1.0.10] - 2026-07-18
+
 ### 新增
-- 为浏览器 MCP 客户端新增基于来源白名单的 CORS 支持：
+- 为浏览器 MCP 客户端新增基于来源白名单的 CORS 支持（PR #18，贡献者 @abevol）：
   - 所有 MCP HTTP 端点均支持 `OPTIONS` 预检请求。
   - 普通响应和流式响应精确回显已验证的请求 Origin。
   - SSE 端点继续遵循来源白名单，不使用通配 CORS。
 
 ### 修复
-- 修复 `debug_attach_pid` 在 x64dbg 上超时的问题：`mcpattach` 插件命令格式中带前导 `.`（如 `mcpattach .6520`），x64dbg 命令解析器原样传入 `argv[1]`。`ParsePidArg` 使用 `strtoul` 以十进制解析，`.` 导致解析静默失败 — `AttachProcessCore` 从未被调用，`WaitForDebugging` 15 秒后超时。
-- `ParsePidArg` 现在容错前导 `.`（x64dbg 十进制前缀）和 `0x`/`0X`（十六进制前缀）作为深度防御。
-- 错误信息 `"attach failed (see x32dbg-mcp.log)"` 现在使用 `PLUGIN_DIR_NAME` 动态拼接，x64 构建下指向正确的 `x64dbg-mcp.log`。
+- 修复 x32dbg 的调试器、线程和栈响应将 32 位 EIP/ESP/EBP 值错误标记为 `rip`/`rsp`/`rbp` 字段的问题（#14）；响应现在使用与架构一致的寄存器字段。
+- 在地址和寄存器值进入 x64dbg/x32dbg SDK 前拒绝格式错误、负数、超出目标位宽及完整区间溢出的输入，防止 x86 静默截断。
+- 硬件断点和内存断点的大小参数现在会传递给真实的 x64dbg/x32dbg 断点命令，并在创建后回读验证；不支持或未对齐的硬件断点请求会被拒绝。
+- 栈范围检测优先使用 TEB 栈边界，fallback 估算不再发生无符号下溢；符号 fallback 地址使用架构感知格式。
+- CMake 现在拒绝无效或与生成器位数不匹配的 `XDBG_ARCH`，迁移旧版架构派生的 SDK cache，并保留显式库路径覆盖。
+- 修复 `debug_attach_pid` 在 x64dbg 上超时的问题：移除 `mcpattach` 命令中意外添加的十进制前缀（PR #19，贡献者 @abevol）。PID 解析同时防御性兼容 `.`、`0x`/`0X` 前缀并拒绝溢出。
+- 修复全部 Claude Code 命令的 `argument-hint` frontmatter，使 Copilot CLI 1.0.65 及更高版本能够加载所有附带技能（PR #16，贡献者 @thejesh23）。
+- attach 失败信息现在使用与目标架构一致的插件日志目录名。
+
+### 变更
+- MCP 元数据、prompts、skills 与文档中的架构示例改为：可移植场景使用 `cip`/`csp`/`cbp`，x32dbg 专用响应使用 EIP/ESP/EBP。
+- 插件元数据、协议响应、配置、依赖清单及文档中的版本号统一更新至 1.0.10。
+- 新增 12 个双架构回归测试，覆盖响应字段、地址/寄存器位宽、栈范围、断点约束和请求验证。
+
+### 致谢
+- 感谢 **wqwinking** 在 #14 中报告 x32dbg 寄存器字段不匹配问题。
+- 感谢 **thejesh23** 通过 PR #16 修复 Copilot CLI 技能 frontmatter。
+- 感谢 **abevol** 通过 PR #18 和 PR #19 贡献浏览器 CORS 支持与 x64dbg attach 修复。
 
 ## [1.0.9] - 2026-07-13
 
@@ -326,6 +343,9 @@ x64dbg MCP Server Plugin 的所有重要变更都会记录在此文件中。
 
 | 版本 | 发布日期 | 关键特性 |
 |------|----------|----------|
+| 1.0.10 | 2026-07-18 | x32dbg 寄存器字段兼容、架构边界检查、CORS、attach 与技能修复 |
+| 1.0.9 | 2026-07-13 | 远程 Host 白名单、x32dbg 栈宽度修复、安全默认配置 |
+| 1.0.8 | 2026-05-25 | PID 附加、CSRF/DNS-rebinding 加固、安全权限默认值 |
 | 1.0.3 | 2026-03-04 | 通用化脱壳流程、运行态 dump 恢复、自动脱壳稳定性修复、线程切换一致性修复 |
 | 1.1.0 | TBD | 双架构支持、Dump 与脱壳、脚本执行、上下文快照 |
 | 1.0.0 | 2025-11-18 | 首次公开发布 |

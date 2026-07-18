@@ -1,4 +1,4 @@
-# x64dbg MCP Tool Reference
+# x64dbg/x32dbg MCP Tool Reference
 
 Quick reference for all 79 MCP tools organized by category.
 
@@ -108,7 +108,7 @@ Quick reference for all 79 MCP tools organized by category.
 |------|-----------|-------------|
 | `stack_get_trace` | - | Call stack trace |
 | `stack_read_frame` | `address`, `size` | Read stack frame data |
-| `stack_get_pointers` | - | RSP/RBP values |
+| `stack_get_pointers` | - | RSP/RBP values on x64; ESP/EBP values on x86 |
 | `stack_is_on_stack` | `address` | Check if address is on stack |
 
 ## Dump
@@ -125,7 +125,7 @@ Quick reference for all 79 MCP tools organized by category.
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `script_execute` | `command` | Execute x64dbg command |
+| `script_execute` | `command` | Execute x64dbg/x32dbg command |
 | `script_execute_batch` | `commands[]`, `stop_on_error?` | Batch commands |
 | `script_get_last_result` | - | Last command result |
 
@@ -141,7 +141,7 @@ Quick reference for all 79 MCP tools organized by category.
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `eval_expression` | `expression` | Evaluate x64dbg expression (math, symbols, `[rsp+8]`, etc.) |
+| `eval_expression` | `expression` | Evaluate x64dbg/x32dbg expressions (math, symbols, native registers, `[csp+8]`, etc.) |
 
 ## Cross-References
 

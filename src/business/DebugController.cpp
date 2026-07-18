@@ -2,6 +2,7 @@
 #include "ThreadManager.h"
 #include "../core/Logger.h"
 #include "../core/Exceptions.h"
+#include "../core/TargetValueValidator.h"
 #include "../core/X64DBGBridge.h"
 #include <limits>
 #include <windows.h>
@@ -24,7 +25,7 @@ bool IsExecutableProtection(DWORD protection) {
 }
 
 bool IsRunToTargetAddressValid(uint64_t address) {
-    if (address == 0 || address > std::numeric_limits<duint>::max()) {
+    if (address == 0 || !TargetValueValidator::FitsAddress(address)) {
         return false;
     }
 

@@ -5,6 +5,7 @@
 
 #include "ModuleHandler.h"
 #include "../core/MethodDispatcher.h"
+#include "../core/RequestValidator.h"
 #include "../core/Exceptions.h"
 #include "../core/Logger.h"
 #include "../utils/StringUtils.h"
@@ -102,11 +103,9 @@ bool ResolveModuleByQueryFallback(const std::string& query, Script::Module::Modu
 }
 
 bool ResolveModuleInfo(const std::string& nameOrAddr, Script::Module::ModuleInfo& info) {
-    try {
-        duint address = StringUtils::ParseAddress(nameOrAddr);
-        if (Script::Module::InfoFromAddr(address, &info))
-            return true;
-    } catch (...) {}
+    auto address = RequestValidator::TryValidateAddressOrName(nameOrAddr);
+    if (address.has_value() && Script::Module::InfoFromAddr(address.value(), &info))
+        return true;
     if (Script::Module::InfoFromName(nameOrAddr.c_str(), &info))
         return true;
     return ResolveModuleByQueryFallback(nameOrAddr, &info);
@@ -171,11 +170,9 @@ json ModuleHandler::Get(const json& params) {
     
     if (params.contains("module")) {
         std::string module = params["module"].get<std::string>();
-        try {
-            duint address = StringUtils::ParseAddress(module);
-            success = Script::Module::InfoFromAddr(address, &info);
-        } catch (...) {
-            success = false;
+        auto address = RequestValidator::TryValidateAddressOrName(module);
+        if (address.has_value()) {
+            success = Script::Module::InfoFromAddr(address.value(), &info);
         }
         if (!success) {
             success = Script::Module::InfoFromName(module.c_str(), &info);
@@ -190,8 +187,7 @@ json ModuleHandler::Get(const json& params) {
             success = ResolveModuleByQueryFallback(name, &info);
         }
     } else {
-        std::string addressStr = params["address"].get<std::string>();
-        duint address = StringUtils::ParseAddress(addressStr);
+        uint64_t address = RequestValidator::GetAddress(params, "address");
         success = Script::Module::InfoFromAddr(address, &info);
     }
     

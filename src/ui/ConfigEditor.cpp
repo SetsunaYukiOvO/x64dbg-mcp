@@ -297,7 +297,7 @@ json ConfigEditor::GetConfigFromControls(HWND hwndDlg) {
     }));
 
     // 保留version字段
-    config["version"] = s_config.value("version", "1.0.9");
+    config["version"] = s_config.value("version", "1.0.10");
     
     return config;
 }

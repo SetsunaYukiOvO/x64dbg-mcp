@@ -7,16 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.10] - 2026-07-18
+
 ### Added
-- Added CORS support for browser-based MCP clients with allowlisted origins:
+- Added CORS support for browser-based MCP clients with allowlisted origins (PR #18 by @abevol):
   - `OPTIONS` preflight requests are supported on all MCP HTTP endpoints.
   - Standard and streaming responses reflect the validated request Origin.
   - SSE endpoints preserve the origin allowlist instead of using wildcard CORS.
 
 ### Fixed
-- Fixed `debug_attach_pid` timing out on x64dbg: the `mcpattach` plugin command was formatted with a leading `.` (e.g. `mcpattach .6520`) which the x64dbg command parser passes verbatim to `argv[1]`. `ParsePidArg` uses `strtoul` with base 10, so `.` caused the parse to fail silently — `AttachProcessCore` was never called, and `WaitForDebugging` timed out after 15 seconds.
-- `ParsePidArg` now tolerates leading `.` (x64dbg decimal prefix) and `0x`/`0X` (hex prefix) for defense in depth.
-- Error message `"attach failed (see x32dbg-mcp.log)"` now correctly uses `PLUGIN_DIR_NAME` so it points to `x64dbg-mcp.log` on 64-bit builds.
+- Fixed x32dbg debugger, thread, and stack responses exposing 32-bit EIP/ESP/EBP values under the misleading `rip`/`rsp`/`rbp` field names (#14). Responses now use architecture-correct register fields.
+- Rejected malformed, negative, out-of-range, and range-overflowing addresses and register values before they reach x64dbg/x32dbg SDK calls, preventing silent x86 truncation.
+- Hardware and memory breakpoint size parameters now control the actual x64dbg/x32dbg breakpoint commands and are verified after creation; unsupported or misaligned hardware requests are rejected.
+- Stack range detection now uses TEB stack bounds when available and avoids unsigned underflow in its fallback estimate. Symbol fallback addresses use architecture-aware formatting.
+- CMake now rejects invalid or generator-mismatched `XDBG_ARCH` values, migrates legacy architecture-derived SDK cache entries, and preserves explicit library overrides.
+- Fixed `debug_attach_pid` timing out on x64dbg by removing the unintended decimal prefix from the `mcpattach` command (PR #19 by @abevol). PID parsing also accepts defensive `.` and `0x`/`0X` prefixes and rejects overflow.
+- Fixed all Claude Code command `argument-hint` frontmatter values so Copilot CLI 1.0.65 and later load every bundled skill (PR #16 by @thejesh23).
+- Attach failure messages now use the architecture-specific plugin log directory name.
+
+### Changed
+- Updated architecture examples across MCP metadata, prompts, skills, and documentation to use `cip`/`csp`/`cbp` where portable and EIP/ESP/EBP for x32dbg-specific responses.
+- Version metadata, protocol responses, configuration, dependencies, and documentation updated to 1.0.10.
+- Added 12 dual-architecture regression tests covering response field names, address/register widths, stack ranges, breakpoint constraints, and request validation.
+
+### Acknowledgments
+- Thanks to **wqwinking** for reporting the x32dbg register-field mismatch in #14.
+- Thanks to **thejesh23** for contributing the Copilot CLI skill frontmatter fix in PR #16.
+- Thanks to **abevol** for contributing browser CORS support and the x64dbg attach fix in PR #18 and PR #19.
 
 ## [1.0.9] - 2026-07-13
 
@@ -326,6 +343,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Release Date | Key Features |
 |---------|-------------|--------------|
+| 1.0.10 | 2026-07-18 | x32dbg register-field compatibility, architecture boundary checks, CORS, attach and skill fixes |
+| 1.0.9 | 2026-07-13 | Remote Host allowlist, x32dbg stack-width fix, secure packaged defaults |
+| 1.0.8 | 2026-05-25 | Attach-by-PID, CSRF/DNS-rebinding hardening, secure permission defaults |
 | 1.0.3 | 2026-03-04 | Generalized unpacking flow, running-state dump recovery, auto-unpack stability fixes, thread-switch consistency fixes |
 | 1.1.0 | TBD | Dual architecture, Dump & unpacking, Script execution, Context snapshots |
 | 1.0.0 | 2025-11-18 | Initial public release |

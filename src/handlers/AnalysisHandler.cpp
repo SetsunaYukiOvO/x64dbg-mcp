@@ -1,5 +1,6 @@
 #include "AnalysisHandler.h"
 #include "../core/MethodDispatcher.h"
+#include "../core/RequestValidator.h"
 #include "../core/Exceptions.h"
 #include "../core/Logger.h"
 #include "../core/X64DBGBridge.h"
@@ -21,7 +22,7 @@ nlohmann::json AnalysisHandler::XrefGet(const nlohmann::json& params) {
     if (!params.contains("address"))
         throw InvalidParamsException("Missing required parameter: address");
 
-    uint64_t addr = StringUtils::ParseAddress(params["address"].get<std::string>());
+    uint64_t addr = RequestValidator::GetAddress(params, "address");
 
     XREF_INFO info;
     memset(&info, 0, sizeof(info));
@@ -90,7 +91,7 @@ nlohmann::json AnalysisHandler::FunctionGet(const nlohmann::json& params) {
     if (!params.contains("address"))
         throw InvalidParamsException("Missing required parameter: address");
 
-    uint64_t addr = StringUtils::ParseAddress(params["address"].get<std::string>());
+    uint64_t addr = RequestValidator::GetAddress(params, "address");
 
     duint start = 0, end = 0, icount = 0;
     bool found = Script::Function::Get(static_cast<duint>(addr), &start, &end, &icount);

@@ -1,6 +1,7 @@
 #include "StackManager.h"
 #include "../core/Exceptions.h"
 #include "../core/Logger.h"
+#include "../utils/StringUtils.h"
 #include "RegisterManager.h"
 #include "SymbolResolver.h"
 #include "_scriptapi_stack.h"
@@ -210,18 +211,29 @@ bool StackManager::IsAddressOnStack(uint64_t address) {
     if (!DbgIsDebugging()) {
         return false;
     }
-    
+
     try {
-        uint64_t rsp = GetStackPointer();
-        
-        // 获取线程环境块信息来确定栈边界
-        // 简化实现：假设栈大小为 1MB（典型值）
-        uint64_t stackSize = 1024 * 1024;
-        uint64_t stackBase = rsp + stackSize;  // 栈向下增长
-        
-        // 检查地址是否在合理的栈范围内
-        return (address >= rsp - 0x10000) && (address <= stackBase);
-        
+        const uint64_t stackPointer = GetStackPointer();
+        const duint tebAddress = DbgGetTebAddress(DbgGetThreadId());
+        if (tebAddress != 0) {
+            struct TebStackBounds {
+                duint exceptionList;
+                duint StackBase;
+                duint StackLimit;
+            };
+
+            TebStackBounds bounds{};
+            if (Script::Memory::Read(tebAddress, &bounds, sizeof(bounds), nullptr) &&
+                bounds.StackLimit <= stackPointer &&
+                stackPointer < bounds.StackBase) {
+                return address >= bounds.StackLimit && address < bounds.StackBase;
+            }
+        }
+
+        return IsWithinEstimatedStackRange(
+            address,
+            stackPointer,
+            std::numeric_limits<duint>::max());
     } catch (...) {
         return false;
     }
@@ -233,16 +245,10 @@ std::string StackManager::ResolveSymbol(uint64_t address) {
         if (symbol.has_value()) {
             return symbol.value();
         }
-        // 如果解析失败，返回地址字符串
-        char buf[32];
-        snprintf(buf, sizeof(buf), "0x%016llX", address);
-        return std::string(buf);
     } catch (...) {
-        // 如果解析失败，返回地址字符串
-        char buf[32];
-        snprintf(buf, sizeof(buf), "0x%016llX", address);
-        return std::string(buf);
     }
+
+    return StringUtils::FormatAddress(address);
 }
 
 } // namespace MCP

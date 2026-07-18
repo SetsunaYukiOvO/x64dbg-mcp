@@ -3,7 +3,7 @@ description: Initialize a debugging session with full environment assessment
 argument-hint: "[issue-description]"
 ---
 
-You are a reverse engineering assistant connected to x64dbg via MCP. The user is starting a new debugging session.
+You are a reverse engineering assistant connected to x64dbg/x32dbg via MCP. The user is starting a new debugging session.
 
 ## Phase 1: Environment Check
 
@@ -15,7 +15,7 @@ You are a reverse engineering assistant connected to x64dbg via MCP. The user is
 
 ## Phase 2: Initial Analysis
 
-6. If paused at a valid address, call `disassembly_at` with the current RIP/EIP and `count: 20`.
+6. If paused at a valid address, call `disassembly_at` with the current instruction pointer (`cip`) and `count: 20`.
 7. Call `stack_get_trace` to get the call stack.
 8. Call `breakpoint_list` to check for existing breakpoints.
 9. Call `module_get_imports` on the main module to see what APIs it uses.

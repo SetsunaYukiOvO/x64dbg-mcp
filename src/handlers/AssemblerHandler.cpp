@@ -1,5 +1,6 @@
 #include "AssemblerHandler.h"
 #include "../core/MethodDispatcher.h"
+#include "../core/RequestValidator.h"
 #include "../core/Exceptions.h"
 #include "../core/Logger.h"
 #include "../core/X64DBGBridge.h"
@@ -21,7 +22,7 @@ nlohmann::json AssemblerHandler::Assemble(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
 
     std::string instruction = params["instruction"].get<std::string>();
-    uint64_t addr = StringUtils::ParseAddress(params["address"].get<std::string>());
+    uint64_t addr = RequestValidator::GetAddress(params, "address");
     bool writeToMemory = params.value("write_to_memory", false);
 
     if (writeToMemory) {

@@ -2,6 +2,7 @@
 #include "../business/MemoryManager.h"
 #include "../core/MethodDispatcher.h"
 #include "../core/PermissionChecker.h"
+#include "../core/RequestValidator.h"
 #include "../core/Exceptions.h"
 #include "../utils/StringUtils.h"
 #include <algorithm>
@@ -55,12 +56,9 @@ nlohmann::json MemoryHandler::Read(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: size");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     size_t size = params["size"].get<size_t>();
     std::string encoding = params.value("encoding", "hex");
-    
-    // 瑙ｆ瀽鍦板潃
-    uint64_t address = StringUtils::ParseAddress(addressStr);
     
     // 璇诲彇鍐呭瓨
     auto& manager = MemoryManager::Instance();
@@ -90,12 +88,11 @@ nlohmann::json MemoryHandler::Write(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: data");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     std::string dataStr = params["data"].get<std::string>();
     std::string encoding = params.value("encoding", "hex");
     
     // 瑙ｆ瀽鍦板潃鍜屾暟鎹?
-    uint64_t address = StringUtils::ParseAddress(addressStr);
     auto data = DecodeData(dataStr, encoding);
     
     if (data.empty()) {
@@ -127,10 +124,10 @@ nlohmann::json MemoryHandler::Search(const nlohmann::json& params) {
     size_t maxResults = 1000;
     
     if (params.contains("start")) {
-        startAddr = StringUtils::ParseAddress(params["start"].get<std::string>());
+        startAddr = RequestValidator::GetAddress(params, "start");
     }
     if (params.contains("end")) {
-        endAddr = StringUtils::ParseAddress(params["end"].get<std::string>());
+        endAddr = RequestValidator::GetAddress(params, "end");
     }
     if (params.contains("max_results")) {
         maxResults = params["max_results"].get<size_t>();
@@ -163,20 +160,20 @@ nlohmann::json MemoryHandler::GetInfo(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     
     // 鑾峰彇鍐呭瓨淇℃伅
     auto& manager = MemoryManager::Instance();
     auto info = manager.GetMemoryInfo(address);
     
     if (!info.has_value()) {
-        throw InvalidAddressException("Invalid address: " + addressStr);
+        throw InvalidAddressException("Invalid address: " +
+                                      StringUtils::FormatAddress(address));
     }
     
     // 鏋勫缓鍝嶅簲
     nlohmann::json result;
-    result["queried_address"] = addressStr;
+    result["queried_address"] = StringUtils::FormatAddress(address);
     result["base"] = StringUtils::FormatAddress(info->base);
     result["size"] = info->size;
     result["protection"] = info->protection;
@@ -261,15 +258,15 @@ nlohmann::json MemoryHandler::Free(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     
     // 閲婃斁鍐呭瓨
     auto& manager = MemoryManager::Instance();
     bool success = manager.Free(address);
     
     if (!success) {
-        throw MCPException("Failed to free memory at: " + addressStr);
+        throw MCPException("Failed to free memory at: " +
+                           StringUtils::FormatAddress(address));
     }
     
     // 鏋勫缓鍝嶅簲

@@ -17,6 +17,14 @@ std::string BuildFallbackParameterDescription(const MCPToolParameter& parameter)
     return "Input parameter '" + parameter.name + "'.";
 }
 
+json SupportedHardwareBreakpointSizes() {
+#ifdef XDBG_ARCH_X64
+    return json::array({1, 2, 4, 8});
+#else
+    return json::array({1, 2, 4});
+#endif
+}
+
 } // namespace
 
 json MCPToolParameter::ToSchema() const {
@@ -227,7 +235,7 @@ void MCPToolRegistry::RegisterDefaultTools() {
 
     RegisterTool({
         "debug_init",
-        "Start a new debug session by loading an executable (equivalent to x64dbg's 'Run' button). Works regardless of current debug state — use this to relaunch the target after a crash, exit, or manual stop. If 'path' is omitted, falls back to the most recently observed debuggee path.",
+        "Start a new debug session by loading an executable (equivalent to x64dbg/x32dbg's 'Run' button). Works regardless of current debug state — use this to relaunch the target after a crash, exit, or manual stop. If 'path' is omitted, falls back to the most recently observed debuggee path.",
         "debug.init",
         {
             {"path", "string", "Absolute path to the executable to debug. Optional — if omitted, the last observed debuggee path is reused.", false, "", nullptr},
@@ -261,7 +269,7 @@ void MCPToolRegistry::RegisterDefaultTools() {
         "Read value of a single register",
         "register.get",
         {
-            {"name", "string", "Register name (e.g. 'rax', 'rip', 'eflags')", true, nullptr, nullptr}
+            {"name", "string", "Register name (e.g. 'rax'/'eax', 'rip'/'eip', 'eflags')", true, nullptr, nullptr}
         }
     });
     
@@ -370,9 +378,13 @@ void MCPToolRegistry::RegisterDefaultTools() {
         "breakpoint.set",
         {
             {"address", "string", "Breakpoint address", true, nullptr, nullptr},
-            {"type", "string", "Breakpoint type", false, "software", 
+            {"type", "string", "Breakpoint type", false, "software",
              json::array({"software", "hardware", "memory"})},
-            {"enabled", "boolean", "Enable immediately", false, true, nullptr}
+            {"hw_condition", "string", "Hardware access condition (only with type=hardware)", false, "execute",
+             json::array({"execute", "write", "readwrite"})},
+            {"hw_size", "integer", "Hardware watch size in bytes (only with type=hardware; execute requires 1)", false, 1,
+             SupportedHardwareBreakpointSizes()},
+            {"mem_size", "integer", "Exact memory breakpoint range size in bytes (only with type=memory)", false, 1, nullptr}
         }
     });
     
@@ -509,7 +521,7 @@ void MCPToolRegistry::RegisterDefaultTools() {
     
     RegisterTool({
         "stack_get_pointers",
-        "Get stack pointer values (RSP, RBP)",
+        "Get stack pointer values (RSP/RBP on x64, ESP/EBP on x86)",
         "stack.get_pointers",
         {}
     });
@@ -555,7 +567,7 @@ void MCPToolRegistry::RegisterDefaultTools() {
         "breakpoint.set_condition",
         {
             {"address", "string", "Breakpoint address", true, nullptr, nullptr},
-            {"condition", "string", "Condition expression (e.g. 'rax==5')", true, nullptr, nullptr}
+            {"condition", "string", "Condition expression (e.g. 'cip==module.entry')", true, nullptr, nullptr}
         }
     });
     
@@ -739,19 +751,19 @@ void MCPToolRegistry::RegisterDefaultTools() {
     // 15. Script Execution Tools
     RegisterTool({
         "script_execute",
-        "Execute single x64dbg script command",
+        "Execute single x64dbg/x32dbg script command",
         "script.execute",
         {
-            {"command", "string", "x64dbg command to execute (e.g. 'bp 401000')", true, nullptr, nullptr}
+            {"command", "string", "x64dbg/x32dbg command to execute (e.g. 'bp 401000')", true, nullptr, nullptr}
         }
     });
     
     RegisterTool({
         "script_execute_batch",
-        "Execute multiple x64dbg commands in sequence",
+        "Execute multiple x64dbg/x32dbg commands in sequence",
         "script.execute_batch",
         {
-            {"commands", "array", "Array of x64dbg commands", true, nullptr, nullptr,
+            {"commands", "array", "Array of x64dbg/x32dbg commands", true, nullptr, nullptr,
              json{{"type", "string"}}},
             {"stop_on_error", "boolean", "Stop execution if a command fails", false, true, nullptr}
         }
@@ -795,10 +807,10 @@ void MCPToolRegistry::RegisterDefaultTools() {
     // 17. Expression Evaluation
     RegisterTool({
         "eval_expression",
-        "Evaluate an x64dbg expression (math, symbols, registers, memory dereferences like [rsp+8])",
+        "Evaluate an x64dbg/x32dbg expression (math, symbols, registers, memory dereferences like [csp+8])",
         "eval.expression",
         {
-            {"expression", "string", "Expression to evaluate (e.g. 'rax+rbx*2', '[rsp+8]', 'kernel32.base')", true, nullptr, nullptr}
+            {"expression", "string", "Expression to evaluate (e.g. 'cip+5', '[csp+8]', 'kernel32.base')", true, nullptr, nullptr}
         }
     });
 

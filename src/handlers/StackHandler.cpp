@@ -1,8 +1,10 @@
 #include "StackHandler.h"
 #include "../business/StackManager.h"
+#include "../core/ArchitectureRegisterNames.h"
 #include "../core/Exceptions.h"
 #include "../core/Logger.h"
 #include "../core/MethodDispatcher.h"
+#include "../core/RequestValidator.h"
 #include "../utils/StringUtils.h"
 #include <iomanip>
 #include <sstream>
@@ -59,8 +61,7 @@ nlohmann::json StackHandler::ReadStackFrame(const nlohmann::json& params) {
     }
     
     // 解析地址
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     
     size_t size = params["size"].get<size_t>();
     
@@ -91,8 +92,8 @@ nlohmann::json StackHandler::GetStackPointers(const nlohmann::json& params) {
     uint64_t rbp = stackMgr.GetBasePointer();
     
     nlohmann::json result;
-    result["rsp"] = StringUtils::FormatAddress(rsp);
-    result["rbp"] = StringUtils::FormatAddress(rbp);
+    result[ArchitectureRegisterNames::StackPointer] = StringUtils::FormatAddress(rsp);
+    result[ArchitectureRegisterNames::BasePointer] = StringUtils::FormatAddress(rbp);
     result["on_stack"] = true;  // 当前总是在栈上
     
     return result;
@@ -106,8 +107,7 @@ nlohmann::json StackHandler::IsOnStack(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: address");
     }
     
-    std::string addressStr = params["address"].get<std::string>();
-    uint64_t address = StringUtils::ParseAddress(addressStr);
+    uint64_t address = RequestValidator::GetAddress(params, "address");
     
     auto& stackMgr = StackManager::Instance();
     bool onStack = stackMgr.IsAddressOnStack(address);
@@ -126,8 +126,8 @@ nlohmann::json StackHandler::FormatStackFrame(const StackFrame& frame) {
     j["from"] = StringUtils::FormatAddress(frame.from);
     j["to"] = StringUtils::FormatAddress(frame.to);
     j["comment"] = frame.comment;
-    j["rsp"] = StringUtils::FormatAddress(frame.rsp);
-    j["rbp"] = StringUtils::FormatAddress(frame.rbp);
+    j[ArchitectureRegisterNames::StackPointer] = StringUtils::FormatAddress(frame.rsp);
+    j[ArchitectureRegisterNames::BasePointer] = StringUtils::FormatAddress(frame.rbp);
     j["is_user"] = frame.isUser;
     j["party"] = frame.party;
     

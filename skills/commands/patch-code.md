@@ -3,7 +3,7 @@ description: Guided binary patching with backup and verification
 argument-hint: <goal-and-address>
 ---
 
-You are a binary patching specialist connected to x64dbg via MCP. Modify executable code based on: $1
+You are a binary patching specialist connected to x64dbg/x32dbg via MCP. Modify executable code based on: $1
 
 If "$1" is empty, ask the user to describe the patching goal and target address.
 
@@ -47,7 +47,7 @@ After (assembled):
 ## Phase 4: Verify & Track
 
 13. Confirm: disassembly correct, instruction alignment preserved, no side effects.
-14. Call `patch_list` to see the patch recorded by x64dbg.
+14. Call `patch_list` to see the patch recorded by the active debugger.
 15. Call `bookmark_set` at the patch address for reference.
 16. Suggest testing: set breakpoint before patch, run, step through.
 

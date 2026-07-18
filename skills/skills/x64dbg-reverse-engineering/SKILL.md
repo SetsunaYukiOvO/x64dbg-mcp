@@ -1,12 +1,12 @@
 ---
-name: x64dbg Reverse Engineering
-description: This skill should be used when performing binary analysis, debugging, reverse engineering, unpacking, or vulnerability research with x64dbg debugger via MCP. Provides expert knowledge on x64dbg MCP tools, Windows internals, assembly patterns, and reverse engineering methodology.
-version: 1.0.0
+name: x64dbg/x32dbg Reverse Engineering
+description: This skill should be used when performing binary analysis, debugging, reverse engineering, unpacking, or vulnerability research with x64dbg or x32dbg via MCP. Provides expert knowledge on x64dbg/x32dbg MCP tools, Windows internals, assembly patterns, and reverse engineering methodology.
+version: 1.0.10
 ---
 
-# x64dbg Reverse Engineering Skill
+# x64dbg/x32dbg Reverse Engineering Skill
 
-Expert knowledge base for reverse engineering with x64dbg debugger through MCP protocol.
+Expert knowledge base for reverse engineering with x64dbg or x32dbg through MCP.
 
 ## When to Use
 
@@ -89,7 +89,7 @@ Activate this skill when:
 ### Stack (4 tools)
 - `stack_get_trace` - Call stack trace
 - `stack_read_frame` - Read stack frame (params: `address`, `size`)
-- `stack_get_pointers` - RSP/RBP values
+- `stack_get_pointers` - RSP/RBP values on x64, ESP/EBP values on x86
 - `stack_is_on_stack` - Check address (param: `address`)
 
 ### Dump (5 tools)
@@ -100,7 +100,7 @@ Activate this skill when:
 - `dump_get_dumpable_regions` - List dumpable regions
 
 ### Script (3 tools)
-- `script_execute` - Run x64dbg command (param: `command`)
+- `script_execute` - Run an x64dbg/x32dbg command (param: `command`)
 - `script_execute_batch` - Run batch commands (param: `commands` array)
 - `script_get_last_result` - Get last result
 
@@ -110,7 +110,7 @@ Activate this skill when:
 - `context_compare_snapshots` - Diff two snapshots
 
 ### Expression Evaluation (1 tool)
-- `eval_expression` - Evaluate x64dbg expression (param: `expression`) — supports math, symbols, registers, memory dereferences like `[rsp+8]`
+- `eval_expression` - Evaluate x64dbg/x32dbg expressions (param: `expression`) — supports math, symbols, native registers, and architecture-neutral aliases such as `cip`/`csp` (for example, `[csp+8]`)
 
 ### Cross-References (1 tool)
 - `xref_get` - Get cross-references to an address (param: `address`)
@@ -131,7 +131,7 @@ Activate this skill when:
 - `patch_list` - List all applied byte-level patches
 - `patch_restore` - Restore original bytes at address (param: `address`)
 
-## x64dbg Log Format Syntax
+## x64dbg/x32dbg Log Format Syntax
 
 When using `breakpoint_set_log`, format strings use these placeholders:
 - `{REG}` - Register value in hex (e.g., `{RAX}`, `{RCX}`)
