@@ -1,6 +1,7 @@
 # Build directories
 build_x64/
 build_x86/
+build_*/
 build/
 bin/
 lib/

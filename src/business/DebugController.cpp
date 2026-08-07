@@ -570,7 +570,7 @@ void DebugController::PumpGuiMessages() {
     // DbgUpdateGui is documented as thread-safe by the x64dbg SDK. PeekMessage
     // with nullptr HWND dispatches only messages for the calling thread, which
     // is fine for interop with x64dbg's command queue processing.
-    DbgUpdateGui(0, false);
+    GuiUpdateAllViews();
 
     HWND hwnd = GuiGetWindowHandle();
     if (hwnd == nullptr) {
