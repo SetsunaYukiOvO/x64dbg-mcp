@@ -35,6 +35,7 @@ cmake-build-*/
 .vscode/
 .idea/
 .claude/
+.codex/
 
 # CMake
 CMakeCache.txt
