@@ -4,8 +4,6 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 # My Custom Instructions
 - Perform all code changes on the `dev` branch. Keep `main` for reviewed integration and release changes; do not develop directly on `main`.
-- 使用中文回复
-- 代码注释使用英文
 
 ## Build and development commands
 
