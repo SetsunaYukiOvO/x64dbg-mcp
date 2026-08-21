@@ -42,61 +42,6 @@
 - **安全性**：基于权限的访问控制
 - **可扩展性**：支持自定义方法、资源与提示的插件架构
 
-## v1.0.10 更新内容
-
-- **x32dbg 寄存器字段修复**：调试器状态、线程和栈响应现在使用 EIP/ESP/EBP，不再将 32 位值标记为 RIP/RSP/RBP（#14）。
-- **架构边界加固**：格式错误、溢出或与目标架构不兼容的地址、区间和寄存器值会在 SDK 调用前被拒绝；栈边界和地址格式也改为架构感知。
-- **可靠的断点大小**：硬件断点和内存断点大小会传递到真实调试器命令，并在创建后回读验证。
-- **浏览器 CORS 支持**：白名单 Origin 可在普通和流式 MCP 端点使用 `OPTIONS` 预检及经验证的 CORS 响应头（PR #18，贡献者 @abevol）。
-- **Attach 与技能兼容修复**：x64dbg PID attach 不再超时（PR #19，贡献者 @abevol），所有附带技能可在 Copilot CLI 1.0.65+ 正常加载（PR #16，贡献者 @thejesh23）。
-- **构建与测试覆盖**：严格校验双架构 CMake 配置，并新增 12 个 x64/x86 回归测试。
-
-## v1.0.9 更新内容
-
-- **远程 Host 白名单**：新增 `security.host_allowlist`，可显式允许 FRP/反向代理使用的域名或 IP，同时保留 DNS-rebinding 防护。
-- **x32dbg 栈回溯修复**：x86 保存的帧指针和返回地址改为按原生 4 字节读取，避免相邻栈数据被拼接成无效 64 位地址。
-- **架构相关地址格式**：x32dbg 使用 8 位十六进制地址，x64dbg 继续使用 16 位地址。
-- **安全默认配置同步**：附带的 `config.json` 默认关闭内存/寄存器写入和脚本执行。
-
-## v1.0.8 更新内容
-
-- **安全加固**：新增 CORS Origin/Host 头校验，防止浏览器发起的 CSRF 和 DNS-rebinding 攻击。所有 POST 端点在校验 `Origin`（如存在）时仅允许已配置的白名单来源，同时 `Host` 头必须指向本机回环地址。脚本执行、内存写入、寄存器写入现已**默认关闭**（显式 opt-in）。移除 POST 响应中的 `Access-Control-Allow-Origin: *`。
-- **速率限制**：POST 端点限流至 100 请求/秒，防止 DoS 攻击。
-- **SSE 缓冲区加固**：SSE 客户端累积缓冲区上限设为 1 MiB，防止内存耗尽。
-- **路径穿越防护**：`dump.module` 与 `dump.memory_region` 的 `output_path` 现拒绝 `..`、UNC 路径及空字节注入。
-- **命令注入防护**：`debug.init` 现拒绝包含逗号的路径/参数/目录参数，防止 x64dbg 命令参数混淆。
-
-## 历史版本
-
-### v1.0.7
-
-- Streamable HTTP 传输（MCP 2025-03-26 规范）：新增 `/mcp` 端点，支持 POST/GET/DELETE。
-- 修复 HTTP+SSE 传输协议合规性：`GET /sse` 握手、`POST /message` 响应格式修复。
-- 内存读取/搜索不再要求暂停（#8）。
-
-### v1.0.6
-
-- **新增工具 `debug_init`**：通过加载可执行文件启动新的调试会话（对应 x64dbg 的 "Run" 按钮）。即使当前没有活动会话也能使用，便于目标进程崩溃/退出后，让 AI 无需重连即可重新拉起被调试进程。参数均为可选：`path`、`arguments`、`current_dir`；`path` 为空时会复用最近一次捕获到的目标路径。
-- `debug_restart` 不再要求处于调试中状态 —— 当被调试进程已经退出/崩溃时，会回退到缓存的目标路径，从而可以恢复会话。
-
-### v1.0.5
-
-- **Bug 修复**：`debug_restart` 现在正确工作 — x64dbg 没有 `restart` 脚本命令，改为使用 `init "<path>"` 模拟 GUI 的重启行为（PR #5 by @AMRICHASFUCK）
-- **文档修复**：Resources 数量修正为"7 个直接资源 + 8 个模板"（之前错误标注为 15）
-
-### v1.0.4
-
-- 新增 12 个工具（66 → 78）：`eval_expression`、`xref_get`、`function_list`/`function_get`、`module_get_exports`/`module_get_imports`、`assembler_assemble`、`bookmark_set`/`delete`/`list`、`patch_list`/`patch_restore`
-- 地址参数支持符号名、寄存器名和 x64dbg/x32dbg 表达式（DbgEval 回退）
-- `memory_search` 支持连续 hex 格式
-- Claude Code 插件（`skills/`）含 11 个逆向工程斜杠命令
-- 10 个 MCP 提示词模板重写为多阶段结构化工作流
-- Dump：修复 ImageBase，移除不可靠的自动脱壳/IAT 重建空壳
-
-### v1.0.3
-
-- 通用化脱壳逻辑、Dump 稳定性修复、运行态恢复
-
 ## 从源码构建
 
 ### 前置要求
@@ -236,7 +181,7 @@ copy config.json <x64dbg-path>\x32\plugins\x32dbg-mcp\
 
 ```json
 {
-  "version": "1.0.10",
+  "version": "1.0.11",
   "server": {
     "address": "127.0.0.1",
     "port": 3000
@@ -245,19 +190,94 @@ copy config.json <x64dbg-path>\x32\plugins\x32dbg-mcp\
     "allow_memory_write": false,
     "allow_register_write": false,
     "allow_script_execution": false,
-    "allow_breakpoint_modification": true
+    "allow_breakpoint_modification": true,
+    "allowed_methods": ["debug.*", "memory.*"]
   },
   "security": {
     "origin_allowlist": [],
-    "host_allowlist": []
+    "host_allowlist": [],
+    "auth_enabled": false,
+    "auth_token": ""
   },
   "logging": {
     "enabled": true,
     "level": "info",
-    "file": "x64dbg_mcp.log"
+    "file": "x64dbg_mcp.log",
+    "max_file_size_mb": 10,
+    "console_output": true
+  },
+  "timeout": {
+    "request_timeout_ms": 30000,
+    "step_timeout_ms": 10000,
+    "memory_read_timeout_ms": 5000
+  },
+  "features": {
+    "enable_notifications": true,
+    "enable_heartbeat": true,
+    "heartbeat_interval_seconds": 30,
+    "enable_batch_requests": true,
+    "auto_start_mcp_on_plugin_load": false
   }
 }
 ```
+
+#### 配置编辑器
+
+在 x64dbg 菜单中选择 **Plugins > MCP Server > Edit Config**，即可编辑当前生效的配置文件，无需手工修改 JSON。编辑器按 Server、Security、Permissions、Runtime、Logging 分页，覆盖上述示例的所有运行时配置；`version` 与未来可能新增的未知字段会在保存时保留。
+
+Origin 和 Host 白名单每行填写一项。启用 **Require Bearer token authentication** 时 Token 输入框必填且会掩码显示。非回环监听地址且未启用认证时，保存会要求再次确认。保存后重启 MCP HTTP Server 才会应用服务端配置。
+
+### 外部访问与安全边界
+
+服务默认监听 `127.0.0.1:3000`，这是有意的安全默认值。当前版本**没有**校验 HTTP `Authorization`、Bearer Token、API Key 或 OAuth；`security.origin_allowlist` 和 `security.host_allowlist` 只用于校验浏览器来源和 Host，不是登录密码。
+
+本机使用时直接连接 `http://127.0.0.1:3000/mcp` 即可。局域网或虚拟机访问时，先将配置改为：
+
+```json
+{
+  "server": { "address": "0.0.0.0", "port": 3000 },
+  "security": {
+    "origin_allowlist": ["http://192.168.1.50:3000"],
+    "host_allowlist": ["192.168.1.20", "debugger.example.test"]
+  }
+}
+```
+
+请替换为实际客户端 Origin、服务端 IP 或域名，不要使用 Origin `*`。还必须单独配置 Windows 防火墙、虚拟机 NAT/桥接网络以及路由器端口转发。修改后重启插件。
+
+端点选择：
+
+- 新版 Streamable HTTP：`http://HOST:3000/mcp`
+- 旧版 HTTP+SSE：`http://HOST:3000/sse`
+- JSON-RPC 兼容端点：`http://HOST:3000/rpc`
+- 连通性检查：`GET http://HOST:3000/`
+
+不要把插件端口直接暴露到公网。公网场景应使用 VPN、SSH 隧道或带 TLS、认证、限流和 IP 白名单的反向代理；代理与插件在同机时建议插件仍监听 `127.0.0.1`。代理必须支持 HTTP 流式响应，并转发 `Content-Type`、`Accept`、`Mcp-Protocol-Version`、`Mcp-Session-Id` 和 `Last-Event-ID`。
+
+内置 Bearer 认证可通过以下配置启用，修改后重启插件：
+
+```json
+{
+  "security": {
+    "auth_enabled": true,
+    "auth_token": "replace-with-a-long-random-secret"
+  }
+}
+```
+
+启用后，除 CORS `OPTIONS` 预检外的所有 HTTP 端点均要求 `Authorization: Bearer <auth_token>`。启用认证但 Token 为空时服务将拒绝启动；非回环地址且未启用认证时会记录安全告警。不要提交 Token，并应限制配置文件的访问权限。
+
+内存写入、寄存器写入和脚本执行默认关闭。未认证的公网服务绝不能开启这些权限。
+
+常见问题：
+
+1. `Connection refused`：检查插件是否启动、监听地址/端口、虚拟机转发和防火墙。
+2. 请求被拒绝：将浏览器实际 `Origin` 加入 `origin_allowlist`，将代理或客户端使用的 Host 加入 `host_allowlist`。
+3. `initialize` 成功但没有工具：断开并重新连接，客户端根据 `initialize` 的 capabilities 发现工具。
+4. SSE 404 或一直等待：旧客户端使用 `/sse`，新版客户端使用 `/mcp`。
+5. 多层代理异常：检查 HTTP/1.1 流式传输、长连接超时和 SSE 缓冲设置。
+
+排查时先在调试器主机执行 `curl http://127.0.0.1:3000/`，再逐层测试转发地址。日志中不要包含内存内容、Token 或凭据。
 
 ### 客户端示例
 

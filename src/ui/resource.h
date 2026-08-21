@@ -28,6 +28,40 @@
 #define IDC_METHOD_ADD                   1020
 #define IDC_METHOD_REMOVE                1021
 #define IDC_METHOD_INPUT                 1022
+#define IDC_TAB_SETTINGS                 1023
+#define IDC_FEATURE_AUTOSTART            1024
+#define IDC_SECURITY_ORIGINS             1025
+#define IDC_SECURITY_HOSTS               1026
+#define IDC_AUTH_ENABLED                 1027
+#define IDC_AUTH_TOKEN                   1028
+#define IDC_FOOTER_STATUS                1029
+
+#define IDC_SERVER_GROUP                 1100
+#define IDC_SECURITY_GROUP               1101
+#define IDC_PERMISSIONS_GROUP            1102
+#define IDC_METHODS_GROUP                1103
+#define IDC_TIMEOUT_GROUP                1104
+#define IDC_FEATURES_GROUP               1105
+#define IDC_LOGGING_GROUP                1106
+
+#define IDC_LABEL_SERVER_ADDRESS         1200
+#define IDC_LABEL_SERVER_PORT            1201
+#define IDC_LABEL_SECURITY_ORIGINS       1202
+#define IDC_LABEL_SECURITY_HOSTS         1203
+#define IDC_LABEL_AUTH_TOKEN             1204
+#define IDC_LABEL_METHOD_PATTERN         1205
+#define IDC_LABEL_TIMEOUT_REQUEST        1206
+#define IDC_LABEL_TIMEOUT_STEP           1207
+#define IDC_LABEL_TIMEOUT_MEMORY         1208
+#define IDC_LABEL_HEARTBEAT_INTERVAL     1209
+#define IDC_LABEL_LOG_LEVEL              1210
+#define IDC_LABEL_LOG_FILE               1211
+#define IDC_LABEL_LOG_MAX_SIZE           1212
+#define IDC_LABEL_SECURITY_HINT          1213
+#define IDC_LABEL_RUNTIME_TIMEOUTS       1214
+#define IDC_LABEL_RUNTIME_FEATURES       1215
+#define IDC_LABEL_SECURITY_ALLOWLISTS    1216
+#define IDC_LABEL_SECURITY_AUTH          1217
 
 // Next default values for new objects
 #ifdef APSTUDIO_INVOKED

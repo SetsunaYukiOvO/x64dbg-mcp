@@ -1,7 +1,7 @@
 ---
 name: x64dbg/x32dbg Reverse Engineering
 description: This skill should be used when performing binary analysis, debugging, reverse engineering, unpacking, or vulnerability research with x64dbg or x32dbg via MCP. Provides expert knowledge on x64dbg/x32dbg MCP tools, Windows internals, assembly patterns, and reverse engineering methodology.
-version: 1.0.10
+version: 1.0.11
 ---
 
 # x64dbg/x32dbg Reverse Engineering Skill

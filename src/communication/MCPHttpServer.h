@@ -96,6 +96,9 @@ private:
     // - If Origin is present, it must be in the configured allowlist (empty by default).
     // If Host is present, it must match a loopback address, the bind address, or the configured allowlist.
     bool ValidateCrossOriginAndHost(const std::string& origin, const std::string& host);
+
+    // Validate the configured Bearer token for every non-preflight HTTP request.
+    bool ValidateAuthorization(const std::string& authorization) const;
     
     // 发送 HTTP 响应
     void SendHttpResponse(SOCKET socket, int statusCode, const std::string& body,

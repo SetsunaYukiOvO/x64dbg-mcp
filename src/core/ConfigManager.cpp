@@ -14,7 +14,7 @@ ConfigManager& ConfigManager::Instance() {
 json ConfigManager::CreateDefaultConfig() const {
     json config;
     
-    config["version"] = "1.0.10";
+    config["version"] = "1.0.11";
     
     // Server configuration
     config["server"]["address"] = "127.0.0.1";
@@ -43,6 +43,8 @@ json ConfigManager::CreateDefaultConfig() const {
     // Security
     config["security"]["origin_allowlist"] = json::array();
     config["security"]["host_allowlist"] = json::array();
+    config["security"]["auth_enabled"] = false;
+    config["security"]["auth_token"] = "";
 
     // Timeout
     config["timeout"]["request_timeout_ms"] = 30000;
@@ -233,6 +235,14 @@ json ConfigManager::GetOriginAllowlist() const {
 
 json ConfigManager::GetHostAllowlist() const {
     return Get<json>("security.host_allowlist", json::array());
+}
+
+bool ConfigManager::IsHttpAuthenticationEnabled() const {
+    return Get<bool>("security.auth_enabled", false);
+}
+
+std::string ConfigManager::GetHttpAuthenticationToken() const {
+    return Get<std::string>("security.auth_token", "");
 }
 
 std::string ConfigManager::GetLogLevel() const {

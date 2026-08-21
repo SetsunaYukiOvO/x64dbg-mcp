@@ -18,6 +18,8 @@ private:
     static bool SaveConfig(HWND hwndDlg, const std::string& configPath);
     static void LoadConfigToControls(HWND hwndDlg, const json& config);
     static json GetConfigFromControls(HWND hwndDlg);
+    static void ShowPage(HWND hwndDlg, int page);
+    static void ResizeLayout(HWND hwndDlg);
     
     // 控件ID定义
     enum ControlIDs {
@@ -49,6 +51,9 @@ private:
     
     static std::string s_configPath;
     static json s_config;
+    static int s_currentPage;
+    static int s_initialClientWidth;
+    static int s_initialClientHeight;
 };
 
 } // namespace MCP

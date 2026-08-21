@@ -58,6 +58,8 @@ public:
     
     json GetOriginAllowlist() const;
     json GetHostAllowlist() const;
+    bool IsHttpAuthenticationEnabled() const;
+    std::string GetHttpAuthenticationToken() const;
     std::string GetLogLevel() const;
     std::string GetLogFile() const;
     bool IsLoggingEnabled() const;

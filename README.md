@@ -42,73 +42,6 @@ A Model Context Protocol (MCP) server implementation for x64dbg and x32dbg, enab
 - **Security**: Permission-based access control
 - **Extensible**: Plugin architecture for custom methods, resources, and prompts
 
-## What's New in v1.0.10
-
-- **Correct x32dbg register fields**: debugger state, thread, and stack responses now expose EIP/ESP/EBP instead of labeling 32-bit values as RIP/RSP/RBP (#14).
-- **Architecture boundary hardening**: malformed, overflowing, or architecture-incompatible addresses, ranges, and register values are rejected before SDK calls; stack bounds and address formatting are architecture-aware.
-- **Reliable breakpoint sizes**: hardware and memory breakpoint sizes now reach the native debugger commands and are verified after creation.
-- **Browser CORS support**: allowlisted origins receive `OPTIONS` preflight support and validated CORS headers across normal and streaming MCP endpoints (PR #18 by @abevol).
-- **Attach and skill compatibility fixes**: x64dbg PID attach no longer times out (PR #19 by @abevol), and all bundled skills load on Copilot CLI 1.0.65+ (PR #16 by @thejesh23).
-- **Build and test coverage**: stricter dual-architecture CMake validation plus 12 x64/x86 regression tests.
-
-## What's New in v1.0.9
-
-- **Remote host allowlist**: `security.host_allowlist` permits explicit FRP/reverse-proxy hostnames or IP addresses without disabling DNS-rebinding protection. Loopback and the configured bind address remain allowed by default.
-- **x32dbg stack trace fix**: x86 saved frame pointers and return addresses are now read at their native 4-byte width, preventing adjacent stack values from being combined into invalid 64-bit addresses.
-- **Architecture-aware addresses**: x32dbg formats addresses as 8 hexadecimal digits; x64dbg continues using 16 digits.
-- **Secure packaged defaults**: the shipped `config.json` now matches runtime defaults, with memory/register writes and script execution disabled.
-
-## What's New in v1.0.8
-
-- **Security hardening**: Added CORS Origin/Host header validation to prevent CSRF and DNS-rebinding attacks against the HTTP server. All POST endpoints now require a valid `Origin` (if present) to match the configured origin allowlist, and the `Host` header must resolve to a loopback address. Script execution, memory write, and register write are now **disabled by default** (strict opt-in). Removed `Access-Control-Allow-Origin: *` from POST responses.
-- **Rate limiting**: POST endpoints are now throttled at 100 requests/second to prevent DoS attacks.
-- **SSE buffer hardening**: SSE client accumulated buffers are capped at 1 MiB to prevent memory exhaustion.
-- **Path traversal protection**: `dump.module` and `dump.memory_region` now validate `output_path` to reject `..`, UNC paths, and null bytes.
-- **Command injection protection**: `debug.init` now rejects path/arguments/directory parameters containing commas to prevent x64dbg command argument confusion.
-
-## Previous Versions
-
-### v1.0.7
-
-- **Streamable HTTP transport (MCP 2025-03-26)**: new unified `/mcp` endpoint supporting POST/GET/DELETE.
-- **HTTP+SSE transport spec compliance fixed**: `GET /sse` now sends the required `event: endpoint` handshake; `POST /message` now ACKs correctly.
-- **Memory read/search no longer require a paused debuggee** (#8).
-
-### v1.0.6
-
-- **New Tool**: `debug_init` — starts a new debug session by loading an executable (equivalent to x64dbg's "Run" button). Works even when no session is active, so the bot can relaunch the target after a crash/exit without a reconnect. Accepts optional `path`, `arguments`, and `current_dir`; when `path` is omitted the most recently observed debuggee path is reused.
-- `debug_restart` no longer requires an active debug session — it now falls back to the cached debuggee path, so it can revive a session after the target exits or crashes.
-
-### v1.0.5
-
-- **Bug Fix**: `debug_restart` now works correctly — x64dbg has no `restart` script command; the tool now uses `init "<path>"` to mirror the GUI's restart behavior (PR #5 by @AMRICHASFUCK)
-- **Doc Fix**: Resource count corrected to "7 direct + 8 templates" (was incorrectly listed as 15)
-
-### v1.0.4
-
-- 12 new tools (66 → 78): `eval_expression`, `xref_get`, `function_list`/`function_get`, `module_get_exports`/`module_get_imports`, `assembler_assemble`, `bookmark_set`/`delete`/`list`, `patch_list`/`patch_restore`
-- Address parsing: all address params accept symbols, registers, and x64dbg/x32dbg expressions via DbgEval
-- `memory_search` continuous hex format support
-- Claude Code plugin (`skills/`) with 11 RE slash commands
-- All 10 MCP prompts rewritten with structured multi-phase workflows
-- Dump: fixed ImageBase, removed unreliable auto-unpack/IAT rebuild stubs
-
-### v1.0.3
-
-- Generalized unpacking logic, dump/unpack stability fixes, running-state recovery
-
-### v1.0.2
-
-- Automated testing critical bug fixes, build system improvements
-
-### v1.0.1
-
-- Thread and stack management APIs
-- Enhanced error handling and logging
-
-For complete version history, see [CHANGELOG.md](CHANGELOG.md)
-
-## Building from Source
 
 ### Prerequisites
 
@@ -247,7 +180,7 @@ Edit `config.json` to customize settings:
 
 ```json
 {
-  "version": "1.0.10",
+  "version": "1.0.11",
   "server": {
     "address": "127.0.0.1",
     "port": 3000
@@ -256,19 +189,102 @@ Edit `config.json` to customize settings:
     "allow_memory_write": false,
     "allow_register_write": false,
     "allow_script_execution": false,
-    "allow_breakpoint_modification": true
+    "allow_breakpoint_modification": true,
+    "allowed_methods": ["debug.*", "memory.*"]
   },
   "security": {
     "origin_allowlist": [],
-    "host_allowlist": []
+    "host_allowlist": [],
+    "auth_enabled": false,
+    "auth_token": ""
   },
   "logging": {
     "enabled": true,
     "level": "info",
-    "file": "x64dbg_mcp.log"
+    "file": "x64dbg_mcp.log",
+    "max_file_size_mb": 10,
+    "console_output": true
+  },
+  "timeout": {
+    "request_timeout_ms": 30000,
+    "step_timeout_ms": 10000,
+    "memory_read_timeout_ms": 5000
+  },
+  "features": {
+    "enable_notifications": true,
+    "enable_heartbeat": true,
+    "heartbeat_interval_seconds": 30,
+    "enable_batch_requests": true,
+    "auto_start_mcp_on_plugin_load": false
   }
 }
 ```
+
+#### Configuration editor
+
+Choose **Plugins > MCP Server > Edit Config** to edit the active configuration without manually changing JSON. The editor has pages for Server, Security, Permissions, Runtime, and Logging. It covers every runtime setting in the example above; the `version` field and any unknown future fields are preserved when saving.
+
+For security allowlists, enter one Origin or Host per line. The Token field is masked and is required when **Require Bearer token authentication** is enabled. Saving a non-loopback listener without authentication requires confirmation. Restart the MCP HTTP server after saving for server settings to take effect.
+
+### Remote Access and Security
+
+The server listens on `127.0.0.1` by default. This is intentional: the debugger exposes powerful operations. `security.origin_allowlist` and `security.host_allowlist` validate browser origins and Host headers; they are not passwords or API keys. Use `security.auth_enabled` and `security.auth_token` to enable HTTP Bearer authentication.
+
+#### Local-only (recommended default)
+
+Use `127.0.0.1:3000` and connect from the same Windows host. No firewall rule or port forwarding is required.
+
+#### LAN or VM access
+
+Only do this on a trusted network. Change the bind address and explicitly allow the address used by the client:
+
+```json
+{
+  "server": { "address": "0.0.0.0", "port": 3000 },
+  "security": {
+    "origin_allowlist": ["http://192.168.1.50:3000"],
+    "host_allowlist": ["192.168.1.20", "debugger.example.test"]
+  }
+}
+```
+
+Use the actual client Origin, server hostname, or server IP. Do not add `*` as an Origin. Open TCP port 3000 only on the required Windows network profile, and configure the VM NAT/bridged adapter or router port forwarding separately. Restart the plugin after changing the file.
+
+Endpoints:
+
+- Streamable HTTP clients: `http://HOST:3000/mcp`
+- Legacy HTTP+SSE clients: `http://HOST:3000/sse`
+- JSON-RPC compatibility endpoint: `http://HOST:3000/rpc`
+- Health check: `GET http://HOST:3000/`
+
+#### Internet access
+
+Do not publish the plugin directly to the Internet. Put it behind a VPN, SSH tunnel, or a reverse proxy that provides TLS, authentication, rate limiting, and IP allowlisting. Keep the plugin bound to `127.0.0.1` when the proxy runs on the same machine. A reverse proxy must preserve the MCP streaming response and forward `Content-Type`, `Accept`, `Mcp-Protocol-Version`, `Mcp-Session-Id`, and `Last-Event-ID` headers.
+
+The plugin supports optional `Authorization: Bearer` validation but does not provide an OAuth authorization server. Never enable memory writes, register writes, or script execution on an unauthenticated public endpoint; these permissions are disabled by default and should remain disabled unless explicitly required.
+
+To enable built-in Bearer authentication, store a high-entropy secret in the plugin configuration and restart the plugin:
+
+```json
+{
+  "security": {
+    "auth_enabled": true,
+    "auth_token": "replace-with-a-long-random-secret"
+  }
+}
+```
+
+All HTTP endpoints except CORS `OPTIONS` preflight then require `Authorization: Bearer <auth_token>`. The server refuses to start if authentication is enabled with an empty token, and logs a security warning when a non-loopback listener starts without authentication. Store the configuration with restrictive filesystem permissions and do not commit the token.
+
+#### Common connection failures
+
+1. `Connection refused`: verify the plugin server is started, the bind address/port, and VM NAT or firewall rules.
+2. `403` or rejected request: add the exact browser `Origin` to `security.origin_allowlist` and the proxy/client Hostname to `security.host_allowlist`.
+3. MCP initialize succeeds but tools are missing: reconnect after `initialize`; clients discover capabilities from the response.
+4. SSE hangs or returns 404: use `/sse` for legacy SSE clients and `/mcp` for Streamable HTTP clients.
+5. Works through one proxy but not another: check that HTTP/1.1 streaming, long read timeouts, and SSE buffering are enabled.
+
+For a first diagnostic, run `curl http://127.0.0.1:3000/` on the debugger host, then test the same URL through each forwarding layer. Do not include debugger memory or credentials in issue logs.
 
 ### Client Example
 
