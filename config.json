@@ -1,5 +1,5 @@
 {
-  "version": "1.0.10",
+  "version": "1.0.11",
   "server": {
     "address": "127.0.0.1",
     "port": 3000
@@ -40,7 +40,9 @@
   },
   "security": {
     "origin_allowlist": [],
-    "host_allowlist": []
+    "host_allowlist": [],
+    "auth_enabled": false,
+    "auth_token": ""
   },
   "timeout": {
     "request_timeout_ms": 30000,

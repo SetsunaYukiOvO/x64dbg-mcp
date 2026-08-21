@@ -34,7 +34,7 @@
 #include <fstream>
 
 // 鎻掍欢鐗堟湰淇℃�?
-#define PLUGIN_VERSION "1.0.10"
+#define PLUGIN_VERSION "1.0.11"
 
 // 鍙�?CMake 瑕嗙洊锛歅LUGIN_DISPLAY_NAME, PLUGIN_DIR_NAME
 #ifndef PLUGIN_DISPLAY_NAME
@@ -572,7 +572,7 @@ extern "C" __declspec(dllexport) bool pluginit(PLUG_INITSTRUCT* initStruct) {
                 std::ofstream configFile(configPath);
                 if (configFile.is_open()) {
                     configFile << R"({
-  "version": "1.0.10",
+  "version": "1.0.11",
   "server": {
     "address": "127.0.0.1",
     "port": 3000
@@ -606,7 +606,9 @@ extern "C" __declspec(dllexport) bool pluginit(PLUG_INITSTRUCT* initStruct) {
   },
   "security": {
     "origin_allowlist": [],
-    "host_allowlist": []
+    "host_allowlist": [],
+    "auth_enabled": false,
+    "auth_token": ""
   },
     "logging": {
         "enabled": true,

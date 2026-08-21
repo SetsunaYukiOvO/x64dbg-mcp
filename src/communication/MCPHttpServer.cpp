@@ -104,6 +104,17 @@ void TrimInPlace(std::string& value) {
                 value.end());
 }
 
+bool ConstantTimeEquals(const std::string& left, const std::string& right) {
+    const size_t maxLength = std::max(left.size(), right.size());
+    size_t difference = left.size() ^ right.size();
+    for (size_t i = 0; i < maxLength; ++i) {
+        const unsigned char leftByte = i < left.size() ? static_cast<unsigned char>(left[i]) : 0;
+        const unsigned char rightByte = i < right.size() ? static_cast<unsigned char>(right[i]) : 0;
+        difference |= static_cast<size_t>(leftByte ^ rightByte);
+    }
+    return difference == 0;
+}
+
 bool ParseContentLength(const std::string& headers, size_t& outLength) {
     std::istringstream stream(headers);
     std::string line;
@@ -229,6 +240,20 @@ bool ResolveHostAddress(const std::string& host, in_addr& address) {
     return true;
 }
 
+bool IsLoopbackHost(const std::string& host) {
+    const std::string normalized = ToLowerCopy(host);
+    if (normalized == "localhost" || normalized == "::1") {
+        return true;
+    }
+
+    in_addr address{};
+    if (!ResolveHostAddress(host, address)) {
+        return false;
+    }
+
+    return (ntohl(address.s_addr) & 0xFF000000u) == 0x7F000000u;
+}
+
 bool SendAll(SOCKET socket, const std::string& data) {
     size_t totalSent = 0;
     while (totalSent < data.size()) {
@@ -316,6 +341,15 @@ bool MCPHttpServer::Start(const std::string& host, int port) {
 
     m_host = host;
     m_port = port;
+
+    auto& config = ConfigManager::Instance();
+    if (config.IsHttpAuthenticationEnabled() && config.GetHttpAuthenticationToken().empty()) {
+        Logger::Error("HTTP authentication is enabled but security.auth_token is empty");
+        return false;
+    }
+    if (!IsLoopbackHost(host) && !config.IsHttpAuthenticationEnabled()) {
+        Logger::Warning("SECURITY WARNING: HTTP server is listening on non-loopback address '{}' without authentication", host);
+    }
 
     // 鍒濆鍖?WinSock
     WSADATA wsaData;
@@ -550,10 +584,19 @@ void MCPHttpServer::HandleHttpRequest(SOCKET clientSocket, const std::string& re
 
     const std::string origin = GetHttpHeader(request, "Origin");
     const std::string host = GetHttpHeader(request, "Host");
+    const std::string authorization = GetHttpHeader(request, "Authorization");
 
     // Validate untrusted headers before reflecting Origin in any response.
     if (!ValidateCrossOriginAndHost(origin, host)) {
         SendHttpResponse(clientSocket, 403, "{\"error\":\"Forbidden\"}");
+        return;
+    }
+
+    // Browser preflight requests cannot include credentials. All actual HTTP
+    // requests, including health and SSE endpoints, must authenticate.
+    if (method != "OPTIONS" && !ValidateAuthorization(authorization)) {
+        Logger::Warning("[Security] Rejected unauthenticated {} request to {}", method, path);
+        SendHttpResponse(clientSocket, 401, "{\"error\":\"Unauthorized\"}");
         return;
     }
 
@@ -877,7 +920,7 @@ std::string MCPHttpServer::HandleMCPMethod(const std::string& method, const std:
         return "{\"jsonrpc\":\"2.0\",\"id\":" + requestId +
                ",\"result\":{\"protocolVersion\":\"2024-11-05\","
                "\"capabilities\":{\"tools\":{},\"resources\":{},\"prompts\":{}},"
-               "\"serverInfo\":{\"name\":\"x64dbg-mcp\",\"version\":\"1.0.10\"}}}";
+               "\"serverInfo\":{\"name\":\"x64dbg-mcp\",\"version\":\"1.0.11\"}}}";
     }
     else if (method == "notifications/initialized") {
         // 杩欐槸瀹㈡埛绔彂鐨勯€氱煡锛屼笉闇€瑕佸搷搴?
@@ -1281,6 +1324,23 @@ bool MCPHttpServer::ValidateCrossOriginAndHost(const std::string& origin, const 
     return true;
 }
 
+bool MCPHttpServer::ValidateAuthorization(const std::string& authorization) const {
+    const auto& config = ConfigManager::Instance();
+    if (!config.IsHttpAuthenticationEnabled()) {
+        return true;
+    }
+
+    constexpr const char* kBearerPrefix = "Bearer ";
+    constexpr size_t kBearerPrefixLength = 7;
+    if (authorization.size() <= kBearerPrefixLength ||
+        authorization.compare(0, kBearerPrefixLength, kBearerPrefix) != 0) {
+        return false;
+    }
+
+    return ConstantTimeEquals(authorization.substr(kBearerPrefixLength),
+                              config.GetHttpAuthenticationToken());
+}
+
 void MCPHttpServer::SendHttpResponse(SOCKET socket, int statusCode,
                                      const std::string& body,
                                      const std::string& contentType,
@@ -1299,6 +1359,9 @@ void MCPHttpServer::SendHttpResponse(SOCKET socket, int statusCode,
     response << "HTTP/1.1 " << statusCode << " " << statusText << "\r\n"
              << "Content-Type: " << responseContentType << "\r\n"
              << "Content-Length: " << responseBody.length() << "\r\n";
+    if (statusCode == 401) {
+        response << "WWW-Authenticate: Bearer\r\n";
+    }
     if (!origin.empty()) {
         response << "Access-Control-Allow-Origin: " << origin << "\r\n"
                  << "Vary: Origin\r\n";
