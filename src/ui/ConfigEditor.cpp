@@ -414,7 +414,7 @@ json ConfigEditor::GetConfigFromControls(HWND hwndDlg) {
     config["features"]["heartbeat_interval_seconds"] = GetDlgItemInt(hwndDlg, IDC_HEARTBEAT_INTERVAL, nullptr, FALSE);
     config["features"]["enable_batch_requests"] = IsDlgButtonChecked(hwndDlg, IDC_FEATURE_BATCH) == BST_CHECKED;
     config["features"]["auto_start_mcp_on_plugin_load"] = IsDlgButtonChecked(hwndDlg, IDC_FEATURE_AUTOSTART) == BST_CHECKED;
-    config["version"] = config.value("version", "1.0.11");
+    config["version"] = config.value("version", "1.0.12");
     return config;
 }
 
