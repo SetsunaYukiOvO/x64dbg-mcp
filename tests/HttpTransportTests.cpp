@@ -55,6 +55,8 @@ std::string Post(const std::string& path) {
 }
 
 int main() {
+    MCP::ConfigManager::Instance().Set("server.max_connections", 4);
+    MCP::ConfigManager::Instance().Set("timeout.request_timeout_ms", 150);
     MCP::MCPHttpServer server;
     for (port = 18300; port < 18400; ++port) if (server.Start("127.0.0.1", port)) break;
     if (!server.IsRunning()) return 1;
@@ -67,6 +69,25 @@ int main() {
         if (Post("/rpc").find("\"id\":73") == std::string::npos) return 4;
         if (Post("/message?sessionId=unknown").find("404") == std::string::npos) return 5;
         closesocket(first); closesocket(second);
+        server.Stop();
+        if (!server.Start("127.0.0.1", port)) return 6;
+        std::vector<SOCKET> stalled;
+        for (int i = 0; i < 4; ++i) {
+            auto socket = Connect();
+            const std::string partial = "POST /rpc HTTP/1.1\r\nHost:";
+            send(socket, partial.data(), static_cast<int>(partial.size()), 0);
+            stalled.push_back(socket);
+        }
+        SOCKET rejected = Connect();
+        if (!Read(rejected).empty()) return 7;
+        closesocket(rejected);
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        for (auto socket : stalled) {
+            const auto response = Read(socket);
+            if (response.find("400") == std::string::npos && !response.empty()) return 8;
+            closesocket(socket);
+        }
+        if (Post("/rpc").find("200") == std::string::npos) return 9;
         server.Stop();
     } catch (const std::exception& ex) { std::cerr << ex.what(); return 10; }
     return 0;

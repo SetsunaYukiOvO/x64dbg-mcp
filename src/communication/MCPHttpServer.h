@@ -116,6 +116,7 @@ private:
     SOCKET m_listenSocket;
     std::atomic<bool> m_running;
     std::thread m_serverThread;
+    size_t m_maxConnections = 128;
     std::vector<std::future<void>> m_clientTasks;
     std::mutex m_clientTasksMutex;
     std::unordered_set<SOCKET> m_activeClientSockets;

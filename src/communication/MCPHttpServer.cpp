@@ -109,8 +109,20 @@ bool ReceiveHttpRequest(SOCKET socket, std::string& request, bool& payloadTooLar
     size_t headerEnd = std::string::npos;
     size_t contentLength = 0;
     bool lengthKnown = false;
+    const auto started = std::chrono::steady_clock::now();
+    const auto timeout = std::chrono::milliseconds(ConfigManager::Instance().GetRequestTimeout());
+    const auto requestDeadline = started + timeout;
+    const auto headerDeadline = started + std::min(timeout, std::chrono::milliseconds(10000));
 
     while (true) {
+        const auto deadline = headerEnd == std::string::npos ? headerDeadline : requestDeadline;
+        const auto remaining = std::chrono::duration_cast<std::chrono::microseconds>(deadline - std::chrono::steady_clock::now()).count();
+        if (remaining <= 0) return false;
+        fd_set readable;
+        FD_ZERO(&readable);
+        FD_SET(socket, &readable);
+        timeval wait{static_cast<long>(remaining / 1000000), static_cast<long>(remaining % 1000000)};
+        if (select(0, &readable, nullptr, nullptr, &wait) <= 0) return false;
         int bytesReceived = recv(socket, buffer.data(), static_cast<int>(buffer.size()), 0);
         if (bytesReceived <= 0) {
             break;
@@ -124,6 +136,8 @@ bool ReceiveHttpRequest(SOCKET socket, std::string& request, bool& payloadTooLar
 
         if (headerEnd == std::string::npos) {
             headerEnd = request.find("\r\n\r\n");
+            if ((headerEnd == std::string::npos && request.size() > 32768) ||
+                (headerEnd != std::string::npos && headerEnd > 32768)) return false;
             if (headerEnd != std::string::npos) {
                 const std::string headerPart = request.substr(0, headerEnd + 4);
                 HttpHeaders headers;
@@ -296,6 +310,11 @@ bool MCPHttpServer::Start(const std::string& host, int port) {
         Logger::Warning("SECURITY WARNING: HTTP server is listening on non-loopback address '{}' without authentication", host);
     }
 
+    const int configuredLimit = config.Get<int>("server.max_connections", 128);
+    m_maxConnections = static_cast<size_t>(std::clamp(configuredLimit, 1, 1024));
+    try { m_clientTasks.reserve(m_maxConnections); }
+    catch (const std::exception& ex) { Logger::Error("Cannot allocate HTTP task slots: {}", ex.what()); return false; }
+
     // 鍒濆鍖?WinSock
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
@@ -351,7 +370,12 @@ bool MCPHttpServer::Start(const std::string& host, int port) {
         s_activeInstance = this;
     }
 
-    m_serverThread = std::thread(&MCPHttpServer::ServerLoop, this);
+    try { m_serverThread = std::thread(&MCPHttpServer::ServerLoop, this); }
+    catch (const std::exception& ex) {
+        Logger::Error("Cannot start HTTP accept thread: {}", ex.what());
+        Stop();
+        return false;
+    }
 
     Logger::Info("MCP HTTP Server started on http://" + m_host + ":" + std::to_string(m_port));
     return true;
@@ -443,11 +467,24 @@ void MCPHttpServer::ServerLoop() {
             break;
         }
 
+        CleanupFinishedClientTasks();
+        {
+            std::lock_guard<std::mutex> lock(m_clientTasksMutex);
+            if (m_clientTasks.size() >= m_maxConnections) {
+                closesocket(clientSocket);
+                continue;
+            }
+        }
+        DWORD sendTimeout = 5000;
+        setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO,
+                   reinterpret_cast<const char*>(&sendTimeout), sizeof(sendTimeout));
         {
             std::lock_guard<std::mutex> lock(m_activeClientSocketsMutex);
+            if (!m_running) { closesocket(clientSocket); break; }
             m_activeClientSockets.insert(clientSocket);
         }
 
+        try {
         auto task = std::async(std::launch::async, [this, clientSocket]() {
             try {
                 HandleClient(clientSocket);
@@ -475,6 +512,12 @@ void MCPHttpServer::ServerLoop() {
         {
             std::lock_guard<std::mutex> lock(m_clientTasksMutex);
             m_clientTasks.emplace_back(std::move(task));
+        }
+        } catch (const std::exception& ex) {
+            std::lock_guard<std::mutex> lock(m_activeClientSocketsMutex);
+            m_activeClientSockets.erase(clientSocket);
+            closesocket(clientSocket);
+            Logger::Error("Cannot create HTTP client task: {}", ex.what());
         }
     }
 }
