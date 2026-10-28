@@ -104,3 +104,17 @@ add_executable(uint32_validation UInt32ValidationTests.cpp)
 target_include_directories(uint32_validation PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(uint32_validation PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME uint32_validation COMMAND uint32_validation)
+
+add_executable(http_transport HttpTransportTests.cpp
+    ${CMAKE_SOURCE_DIR}/src/communication/MCPHttpServer.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/ConfigManager.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/Logger.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/MCPToolRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/MCPResourceRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/MCPPromptRegistry.cpp)
+target_include_directories(http_transport PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(http_transport PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_options(http_transport PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+target_link_libraries(http_transport PRIVATE nlohmann_json::nlohmann_json ws2_32 bcrypt)
+add_test(NAME http_transport COMMAND http_transport)
+set_tests_properties(http_transport PROPERTIES TIMEOUT 30)

@@ -208,6 +208,7 @@ set(XDBG_MAIN_LIB_DEFAULT "${_XDBG_DEFAULT_MAIN_LIB}" CACHE INTERNAL "Architectu
 target_link_libraries(x64dbg_mcp PRIVATE
     nlohmann_json::nlohmann_json
     ws2_32
+    bcrypt
     ${XDBG_BRIDGE_LIB}
     ${XDBG_MAIN_LIB}
 )

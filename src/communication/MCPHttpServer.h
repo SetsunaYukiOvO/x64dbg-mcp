@@ -17,6 +17,7 @@
 #include <vector>
 #include <mutex>
 #include <unordered_set>
+#include <unordered_map>
 #include <winsock2.h>
 #include <nlohmann/json_fwd.hpp>
 
@@ -69,7 +70,7 @@ private:
 
     // 处理 POST 消息
     void HandlePostMessage(SOCKET clientSocket, const std::string& body,
-                           const std::string& origin);
+                           const std::string& origin, const std::string& sessionId = "");
 
     // Streamable HTTP transport (MCP 2025-03-26) — single endpoint /mcp.
     // POST returns the JSON-RPC response inline as application/json.
@@ -121,6 +122,8 @@ private:
     std::mutex m_activeClientSocketsMutex;
     std::unordered_set<SOCKET> m_sseClientSockets;
     std::mutex m_sseClientSocketsMutex;
+    struct LegacySession { SOCKET socket; std::string origin; };
+    std::unordered_map<std::string, LegacySession> m_legacySessions;
     std::mutex m_sseSendMutex;
     std::atomic<int> m_requestId;
 

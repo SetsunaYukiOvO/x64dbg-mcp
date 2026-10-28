@@ -16,6 +16,7 @@
 #include "../core/MCPResourceRegistry.h"
 #include "../core/MCPPromptRegistry.h"
 #include <ws2tcpip.h>
+#include <bcrypt.h>
 #include <sstream>
 #include <algorithm>
 #include <array>
@@ -257,12 +258,8 @@ MCPHttpServer::~MCPHttpServer() {
 }
 
 bool MCPHttpServer::BroadcastNotification(const std::string& method, const nlohmann::json& params) {
-    MCPHttpServer* active = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(s_activeInstanceMutex);
-        active = s_activeInstance;
-    }
-
+    std::lock_guard<std::mutex> lock(s_activeInstanceMutex);
+    MCPHttpServer* active = s_activeInstance;
     if (!active || !active->IsRunning()) {
         return false;
     }
@@ -420,6 +417,7 @@ void MCPHttpServer::Stop() {
     {
         std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
         m_sseClientSockets.clear();
+        m_legacySessions.clear();
     }
     {
         std::lock_guard<std::mutex> lock(s_activeInstanceMutex);
@@ -455,10 +453,8 @@ void MCPHttpServer::ServerLoop() {
                 HandleClient(clientSocket);
             } catch (const std::exception& ex) {
                 Logger::Error("Unhandled exception in client handler: {}", ex.what());
-                closesocket(clientSocket);
             } catch (...) {
                 Logger::Error("Unhandled non-standard exception in client handler");
-                closesocket(clientSocket);
             }
 
             {
@@ -468,6 +464,11 @@ void MCPHttpServer::ServerLoop() {
             {
                 std::lock_guard<std::mutex> sseLock(m_sseClientSocketsMutex);
                 m_sseClientSockets.erase(clientSocket);
+                for (auto it = m_legacySessions.begin(); it != m_legacySessions.end();) {
+                    if (it->second.socket == clientSocket) it = m_legacySessions.erase(it);
+                    else ++it;
+                }
+                closesocket(clientSocket);
             }
         });
 
@@ -512,12 +513,10 @@ void MCPHttpServer::HandleClient(SOCKET clientSocket) {
         } else if (!request.empty()) {
             SendHttpResponse(clientSocket, 400, "{\"error\":\"Bad Request\"}");
         }
-        closesocket(clientSocket);
         return;
     }
 
     HandleHttpRequest(clientSocket, request);
-    closesocket(clientSocket);
 }
 
 void MCPHttpServer::HandleHttpRequest(SOCKET clientSocket, const std::string& request) {
@@ -533,6 +532,19 @@ void MCPHttpServer::HandleHttpRequest(SOCKET clientSocket, const std::string& re
     const std::string origin = GetHttpHeader(request, "Origin");
     const std::string host = GetHttpHeader(request, "Host");
     const std::string authorization = GetHttpHeader(request, "Authorization");
+
+    std::string sessionId;
+    const size_t query = path.find('?');
+    if (query != std::string::npos) {
+        const std::string parameters = path.substr(query + 1);
+        path.resize(query);
+        if (parameters.rfind("sessionId=", 0) == 0 && parameters.find('&') == std::string::npos)
+            sessionId = parameters.substr(10);
+        else {
+            SendHttpResponse(clientSocket, 400, "{\"error\":\"Invalid session query\"}");
+            return;
+        }
+    }
 
     // Validate untrusted headers before reflecting Origin in any response.
     if (!ValidateCrossOriginAndHost(origin, host)) {
@@ -594,7 +606,7 @@ void MCPHttpServer::HandleHttpRequest(SOCKET clientSocket, const std::string& re
              (path == "/message" || path == "/" || path == "/messages" ||
               path == "/rpc" || path == "/rpc/")) {
         // 鏀寔澶氱 POST 璺緞锛?, /message, /messages
-        HandlePostMessage(clientSocket, body, origin);
+        HandlePostMessage(clientSocket, body, origin, sessionId);
     }
     else if (method == "GET" && path == "/") {
         // 鍋ュ悍妫€鏌?
@@ -634,22 +646,22 @@ void MCPHttpServer::HandleSSE(SOCKET clientSocket, const std::string& origin) {
         return;
     }
 
-    // MCP SSE transport handshake: immediately announce the POST endpoint.
+    std::array<unsigned char, 32> random{};
+    if (BCryptGenRandom(nullptr, random.data(), static_cast<ULONG>(random.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0)
+        return;
+    std::string sessionId;
+    constexpr char hex[] = "0123456789abcdef";
+    for (const auto byte : random) { sessionId += hex[byte >> 4]; sessionId += hex[byte & 15]; }
     {
-        const std::string endpointEvent =
-            "event: endpoint\r\n"
-            "data: /message\r\n"
-            "\r\n";
-        std::lock_guard<std::mutex> lock(m_sseSendMutex);
-        if (!SendAll(clientSocket, endpointEvent)) {
-            Logger::Error("Failed to send SSE endpoint event");
-            return;
-        }
-    }
-
-    {
+        // Register before announcing the endpoint so an immediate POST can resolve it.
         std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
         m_sseClientSockets.insert(clientSocket);
+        m_legacySessions.emplace(sessionId, LegacySession{clientSocket, origin});
+        if (!SendSSEEvent(clientSocket, "endpoint", "/message?sessionId=" + sessionId)) {
+            m_legacySessions.erase(sessionId);
+            m_sseClientSockets.erase(clientSocket);
+            return;
+        }
     }
 
     Logger::Info("SSE connection established, endpoint event sent");
@@ -759,11 +771,12 @@ void MCPHttpServer::HandleSSE(SOCKET clientSocket, const std::string& origin) {
     {
         std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
         m_sseClientSockets.erase(clientSocket);
+        m_legacySessions.erase(sessionId);
     }
 }
 
 void MCPHttpServer::HandlePostMessage(SOCKET clientSocket, const std::string& body,
-                                      const std::string& origin) {
+                                      const std::string& origin, const std::string& sessionId) {
     Logger::Debug("POST body received: " + body);
 
     try {
@@ -788,12 +801,14 @@ void MCPHttpServer::HandlePostMessage(SOCKET clientSocket, const std::string& bo
 
     Logger::Info("MCP Method: " + method + ", ID: " + requestId);
 
-    // Check whether at least one SSE client is currently connected.
-    // MCP SSE transport delivers the response over SSE, not the POST reply.
-    bool hasSseClient = false;
-    {
+    // Validate a legacy session before dispatching a potentially mutating request.
+    if (!sessionId.empty()) {
         std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
-        hasSseClient = !m_sseClientSockets.empty();
+        const auto session = m_legacySessions.find(sessionId);
+        if (session == m_legacySessions.end() || session->second.origin != origin) {
+            SendHttpResponse(clientSocket, 404, "{\"error\":\"Unknown SSE session\"}", "application/json", origin);
+            return;
+        }
     }
 
     std::string response = HandleMCPMethod(method, requestId, body);
@@ -804,10 +819,13 @@ void MCPHttpServer::HandlePostMessage(SOCKET clientSocket, const std::string& bo
         return;
     }
 
-    if (hasSseClient) {
+    if (!sessionId.empty()) {
         // MCP SSE contract: ack the POST with 202, push response via SSE.
         SendHttpResponse(clientSocket, 202, "", "application/json", origin);
-        BroadcastSSEEvent("message", response);
+        std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
+        const auto session = m_legacySessions.find(sessionId);
+        if (session != m_legacySessions.end())
+            SendSSEEvent(session->second.socket, "message", response);
         Logger::Debug("Response dispatched via SSE: " + response);
     } else {
         // Fallback for plain HTTP clients (no SSE attached): reply inline.
@@ -1195,12 +1213,6 @@ bool MCPHttpServer::ParseHttpRequest(const std::string& request,
     
     path = request.substr(firstSpace + 1, secondSpace - firstSpace - 1);
 
-    // Normalize route path by dropping query parameters.
-    const size_t queryPos = path.find('?');
-    if (queryPos != std::string::npos) {
-        path = path.substr(0, queryPos);
-    }
-    
     // 鎻愬彇 body锛堝湪 \r\n\r\n 涔嬪悗锛?
     size_t bodyStart = request.find("\r\n\r\n");
     if (bodyStart != std::string::npos) {
@@ -1341,33 +1353,11 @@ bool MCPHttpServer::SendSSEEvent(SOCKET socket, const std::string& event, const 
 }
 
 bool MCPHttpServer::BroadcastSSEEvent(const std::string& event, const std::string& data) {
-    std::vector<SOCKET> targets;
-    {
-        std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
-        targets.assign(m_sseClientSockets.begin(), m_sseClientSockets.end());
-    }
-
-    if (targets.empty()) {
-        return false;
-    }
-
-    std::vector<SOCKET> disconnected;
+    // Hold the registry lock until sends complete; a closed socket must never be reused as a target.
+    std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
     bool sentAtLeastOne = false;
-    for (SOCKET clientSocket : targets) {
-        if (SendSSEEvent(clientSocket, event, data)) {
-            sentAtLeastOne = true;
-            continue;
-        }
-        disconnected.push_back(clientSocket);
-    }
-
-    if (!disconnected.empty()) {
-        std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
-        for (SOCKET socket : disconnected) {
-            m_sseClientSockets.erase(socket);
-        }
-    }
-
+    for (SOCKET socket : m_sseClientSockets)
+        sentAtLeastOne = SendSSEEvent(socket, event, data) || sentAtLeastOne;
     return sentAtLeastOne;
 }
 
