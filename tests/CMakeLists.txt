@@ -79,3 +79,8 @@ target_compile_definitions(breakpoint_address_entry_x86 PRIVATE XDBG_ARCH_X86 NO
 target_compile_options(breakpoint_address_entry_x86 PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 target_link_libraries(breakpoint_address_entry_x86 PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME breakpoint_address_entry_x86 COMMAND breakpoint_address_entry_x86)
+
+add_executable(pe_validation PEValidationTests.cpp)
+target_include_directories(pe_validation PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(pe_validation PRIVATE NOMINMAX)
+add_test(NAME pe_validation COMMAND pe_validation)

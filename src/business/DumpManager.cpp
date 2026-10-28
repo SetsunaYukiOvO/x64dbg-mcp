@@ -16,6 +16,7 @@
 #include <limits>
 #include <map>
 #include <windows.h>
+#include "../utils/PEValidation.h"
 
 #ifdef XDBG_SDK_AVAILABLE
 #include "_scriptapi_module.h"  // For Script::Module::EntryFromAddr
@@ -56,7 +57,7 @@ std::string GetSectionName(const IMAGE_SECTION_HEADER& section) {
 bool IsRvaInSection(uint32_t rva, const SectionLayout& section) {
     return section.span != 0 &&
            rva >= section.virtualAddress &&
-           rva < section.virtualAddress + section.span;
+           rva - section.virtualAddress < section.span;
 }
 
 std::optional<size_t> FindSectionIndex(const ModuleLayout& layout, uint32_t rva) {
@@ -73,39 +74,11 @@ std::optional<ModuleLayout> ReadModuleLayout(uint64_t moduleBase) {
 
     auto& memMgr = MemoryManager::Instance();
     std::vector<uint8_t> peHeader = memMgr.Read(moduleBase, kHeaderProbeSize);
-    if (peHeader.size() < sizeof(IMAGE_DOS_HEADER)) {
-        return std::nullopt;
-    }
-
-    const auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(peHeader.data());
-    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE) {
-        return std::nullopt;
-    }
-
-    if (dosHeader->e_lfanew <= 0 ||
-        peHeader.size() < static_cast<size_t>(dosHeader->e_lfanew) + sizeof(IMAGE_NT_HEADERS)) {
-        return std::nullopt;
-    }
-
-    const auto* ntHeaders = reinterpret_cast<const IMAGE_NT_HEADERS*>(
-        peHeader.data() + dosHeader->e_lfanew
-    );
-    if (ntHeaders->Signature != IMAGE_NT_SIGNATURE) {
-        return std::nullopt;
-    }
-
+    const auto peLayout = ValidatePELayout(peHeader);
+    if (!peLayout) return std::nullopt;
+    const auto* ntHeaders = reinterpret_cast<const IMAGE_NT_HEADERS*>(peHeader.data() + peLayout->ntOffset);
     const WORD sectionCount = ntHeaders->FileHeader.NumberOfSections;
-    if (sectionCount == 0) {
-        return std::nullopt;
-    }
-
-    const size_t sectionsOffset = static_cast<size_t>(dosHeader->e_lfanew) + sizeof(IMAGE_NT_HEADERS);
-    const size_t sectionsSize = static_cast<size_t>(sectionCount) * sizeof(IMAGE_SECTION_HEADER);
-    if (peHeader.size() < sectionsOffset + sectionsSize) {
-        return std::nullopt;
-    }
-
-    const auto* sections = reinterpret_cast<const IMAGE_SECTION_HEADER*>(peHeader.data() + sectionsOffset);
+    const auto* sections = reinterpret_cast<const IMAGE_SECTION_HEADER*>(peHeader.data() + peLayout->sectionsOffset);
 
     ModuleLayout layout;
     layout.entryRva = ntHeaders->OptionalHeader.AddressOfEntryPoint;
@@ -239,7 +212,7 @@ std::optional<uint64_t> ResolveModuleBaseByQueryFallback(const std::string& quer
 bool SectionContainsRva(const IMAGE_SECTION_HEADER& section, uint32_t rva) {
     const uint32_t start = section.VirtualAddress;
     const uint32_t span = GetSectionSpan(section);
-    return span != 0 && rva >= start && rva < start + span;
+    return span != 0 && rva >= start && rva - start < span;
 }
 
 std::optional<uint64_t> FindTransferAddressToTarget(uint64_t moduleBase, uint64_t targetAddress) {
@@ -864,24 +837,10 @@ std::vector<MemoryRegionDump> DumpManager::GetDumpableRegions(uint64_t moduleBas
 bool DumpManager::RebuildPEHeaders(uint64_t moduleBase, std::vector<uint8_t>& buffer,
                                    std::optional<uint32_t> newEP) {
     try {
-        if (buffer.size() < sizeof(IMAGE_DOS_HEADER)) {
-            return false;
-        }
-        
-        auto* dosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(buffer.data());
-        if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE) {
-            return false;
-        }
-        
-        if (buffer.size() < dosHeader->e_lfanew + sizeof(IMAGE_NT_HEADERS)) {
-            return false;
-        }
-        
-        auto* ntHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(buffer.data() + dosHeader->e_lfanew);
-        if (ntHeaders->Signature != IMAGE_NT_SIGNATURE) {
-            return false;
-        }
-        
+        const auto layout = ValidatePELayout(buffer);
+        if (!layout) return false;
+        auto* ntHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(buffer.data() + layout->ntOffset);
+
         // 淇鍏ュ彛鐐?
         if (newEP.has_value()) {
             ntHeaders->OptionalHeader.AddressOfEntryPoint = newEP.value();
@@ -943,25 +902,7 @@ std::optional<uint64_t> DumpManager::ParseModuleOrAddress(const std::string& inp
 }
 
 bool DumpManager::ValidatePEHeader(const std::vector<uint8_t>& buffer) {
-    if (buffer.size() < sizeof(IMAGE_DOS_HEADER)) {
-        return false;
-    }
-    
-    auto* dosHeader = reinterpret_cast<const IMAGE_DOS_HEADER*>(buffer.data());
-    if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE) {
-        return false;
-    }
-    
-    if (buffer.size() < dosHeader->e_lfanew + sizeof(IMAGE_NT_HEADERS)) {
-        return false;
-    }
-    
-    auto* ntHeaders = reinterpret_cast<const IMAGE_NT_HEADERS*>(buffer.data() + dosHeader->e_lfanew);
-    if (ntHeaders->Signature != IMAGE_NT_SIGNATURE) {
-        return false;
-    }
-    
-    return true;
+    return ValidatePELayout(buffer).has_value();
 }
 
 bool DumpManager::IsPacked(uint64_t moduleBase, std::string& packerId) {
@@ -985,7 +926,7 @@ bool DumpManager::IsPacked(uint64_t moduleBase, std::string& packerId) {
         }
 
         auto* sections = reinterpret_cast<IMAGE_SECTION_HEADER*>(
-            reinterpret_cast<uint8_t*>(ntHeaders) + sizeof(IMAGE_NT_HEADERS)
+            reinterpret_cast<uint8_t*>(ntHeaders) + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) + ntHeaders->FileHeader.SizeOfOptionalHeader
         );
 
         const uint32_t entryRVA = ntHeaders->OptionalHeader.AddressOfEntryPoint;
@@ -1304,21 +1245,10 @@ std::optional<uint64_t> DumpManager::DetectOEPByPattern(uint64_t moduleBase) {
 
 bool DumpManager::FixPEChecksum(std::vector<uint8_t>& buffer) {
     try {
-        if (buffer.size() < sizeof(IMAGE_DOS_HEADER)) {
-            return false;
-        }
-        
-        auto* dosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(buffer.data());
-        if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE) {
-            return false;
-        }
-        
-        if (buffer.size() < dosHeader->e_lfanew + sizeof(IMAGE_NT_HEADERS)) {
-            return false;
-        }
-        
-        auto* ntHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(buffer.data() + dosHeader->e_lfanew);
-        
+        const auto layout = ValidatePELayout(buffer);
+        if (!layout) return false;
+        auto* ntHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(buffer.data() + layout->ntOffset);
+
         // 绠€鍗曞湴娓呴浂鏍￠獙鍜?
         ntHeaders->OptionalHeader.CheckSum = 0;
         
@@ -1346,14 +1276,15 @@ bool DumpManager::AlignPESections(std::vector<uint8_t>& buffer) {
         }
         
         auto* sections = reinterpret_cast<IMAGE_SECTION_HEADER*>(
-            reinterpret_cast<uint8_t*>(ntHeaders) + sizeof(IMAGE_NT_HEADERS)
+            reinterpret_cast<uint8_t*>(ntHeaders) + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) + ntHeaders->FileHeader.SizeOfOptionalHeader
         );
 
         const auto alignUp = [](uint32_t value, uint32_t alignment) -> uint32_t {
             if (alignment == 0) {
                 return value;
             }
-            return ((value + alignment - 1) / alignment) * alignment;
+            const uint64_t aligned = ((uint64_t(value) + alignment - 1) / alignment) * alignment;
+            return static_cast<uint32_t>(std::min<uint64_t>(aligned, UINT32_MAX));
         };
         
         for (int i = 0; i < ntHeaders->FileHeader.NumberOfSections; i++) {
