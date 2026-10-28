@@ -151,3 +151,8 @@ else()
 endif()
 target_compile_options(memory_search PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 add_test(NAME memory_search COMMAND memory_search)
+
+add_executable(hex_bytes HexBytesTests.cpp)
+target_include_directories(hex_bytes PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(hex_bytes PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+add_test(NAME hex_bytes COMMAND hex_bytes)

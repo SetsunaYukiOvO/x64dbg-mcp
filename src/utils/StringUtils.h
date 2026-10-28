@@ -116,17 +116,22 @@ inline std::vector<uint8_t> HexToBytes(const std::string& hex) {
     }
     
     // 移除空格
-    cleanHex.erase(std::remove_if(cleanHex.begin(), cleanHex.end(), ::isspace), cleanHex.end());
+    cleanHex.erase(std::remove_if(cleanHex.begin(), cleanHex.end(),
+        [](unsigned char c) { return std::isspace(c) != 0; }), cleanHex.end());
     
     // 确保偶数长度
     if (cleanHex.length() % 2 != 0) {
-        cleanHex = "0" + cleanHex;
+        throw std::invalid_argument("Hex data must contain complete byte pairs");
     }
     
     for (size_t i = 0; i < cleanHex.length(); i += 2) {
-        std::string byteStr = cleanHex.substr(i, 2);
-        uint8_t byte = static_cast<uint8_t>(std::stoi(byteStr, nullptr, 16));
-        bytes.push_back(byte);
+        const auto digit = [](unsigned char c) -> unsigned {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            throw std::invalid_argument("Invalid character in hex data");
+        };
+        bytes.push_back(static_cast<uint8_t>((digit(cleanHex[i]) << 4) | digit(cleanHex[i + 1])));
     }
     
     return bytes;
