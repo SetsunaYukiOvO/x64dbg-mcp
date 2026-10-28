@@ -148,6 +148,10 @@ static void CB_InitDebug(CBTYPE cbType, void* callbackInfo) {
 /**
  * @brief x64dbg 鍥炶�? 鍋滄璋冭瘯
  */
+static void CB_PauseDebug(CBTYPE, void*) {
+    DebugController::Instance().NotifyPaused();
+}
+
 static void CB_StopDebug(CBTYPE cbType, void* callbackInfo) {
     Logger::Info("Debug session stopped");
 }
@@ -495,6 +499,7 @@ static void RegisterPluginCommands() {
 static void RegisterCallbacks() {
     _plugin_registercallback(g_pluginHandle, CB_INITDEBUG, MCP::CB_InitDebug);
     _plugin_registercallback(g_pluginHandle, CB_STOPDEBUG, MCP::CB_StopDebug);
+    _plugin_registercallback(g_pluginHandle, CB_PAUSEDEBUG, MCP::CB_PauseDebug);
     _plugin_registercallback(g_pluginHandle, CB_BREAKPOINT, MCP::CB_Breakpoint);
     _plugin_registercallback(g_pluginHandle, CB_EXCEPTION, MCP::CB_Exception);
     _plugin_registercallback(g_pluginHandle, CB_CREATEPROCESS, MCP::CB_CreateProcess);

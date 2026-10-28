@@ -2,6 +2,7 @@
 #include <string>
 #include <cstdint>
 #include <mutex>
+#include <atomic>
 
 namespace MCP {
 
@@ -125,6 +126,8 @@ public:
     /**
      * @brief 记录调试目标路径（由调试会话回调调用，不会触发启动）
      */
+    void NotifyPaused() { m_pauseSequence.fetch_add(1, std::memory_order_release); }
+
     void NotifyDebugSessionStarted(const std::string& path);
 
     /**
@@ -155,6 +158,10 @@ private:
     bool WaitForDebugging(uint32_t timeoutMs);
     bool WaitForPause(uint32_t timeoutMs = 5000);
 
+    uint64_t StepCommand(const std::string& command);
+    bool WaitForNewPause(uint64_t previousSequence, uint32_t timeoutMs);
+    std::recursive_mutex m_operationMutex;
+    std::atomic<uint64_t> m_pauseSequence{0};
     mutable std::mutex m_lastPathMutex;
     std::string m_lastDebuggedPath;
 

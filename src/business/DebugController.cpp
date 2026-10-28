@@ -98,15 +98,17 @@ uint64_t DebugController::GetInstructionPointer() const {
 }
 
 bool DebugController::Run() {
+    std::lock_guard<std::recursive_mutex> operation(m_operationMutex);
     if (!IsDebugging()) {
         throw DebuggerNotRunningException();
     }
     
     Logger::Debug("Executing run command");
-    return ExecuteCommand("run");
+    return ExecuteCommandDirect("run");
 }
 
 bool DebugController::Pause() {
+    std::lock_guard<std::recursive_mutex> operation(m_operationMutex);
     if (!IsDebugging()) {
         throw DebuggerNotRunningException();
     }
@@ -143,70 +145,32 @@ bool DebugController::Pause() {
     return WaitForPause(5000);
 }
 
-uint64_t DebugController::StepInto() {
-    if (!IsPaused()) {
-        throw DebuggerNotPausedException();
-    }
-    
-    Logger::Debug("Executing step into");
-    
-    if (!ExecuteCommand("sti")) {
-        throw MCPException("Step into failed");
-    }
-    
-    if (!WaitForPause()) {
-        throw OperationTimeoutException("Step into timeout");
-    }
-    
-    // 给 x64dbg 一点时间更新寄存器状态
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    
+uint64_t DebugController::StepCommand(const std::string& command) {
+    std::lock_guard<std::recursive_mutex> operation(m_operationMutex);
+    if (!IsPaused()) throw DebuggerNotPausedException();
+    const uint64_t sequence = m_pauseSequence.load(std::memory_order_acquire);
+    // Direct execution checks acceptance before waiting; enqueue success is insufficient.
+    if (!ExecuteCommandDirect(command)) throw MCPException("Step command failed: " + command);
+    if (!WaitForNewPause(sequence, 5000)) throw OperationTimeoutException("Step command timed out: " + command);
     return GetInstructionPointer();
 }
 
-uint64_t DebugController::StepOver() {
-    if (!IsPaused()) {
-        throw DebuggerNotPausedException();
-    }
-    
-    Logger::Debug("Executing step over");
-    
-    if (!ExecuteCommand("sto")) {
-        throw MCPException("Step over failed");
-    }
-    
-    if (!WaitForPause()) {
-        throw OperationTimeoutException("Step over timeout");
-    }
-    
-    // 给 x64dbg 一点时间更新寄存器状态
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    
-    return GetInstructionPointer();
-}
+uint64_t DebugController::StepInto() { return StepCommand("sti"); }
+uint64_t DebugController::StepOver() { return StepCommand("sto"); }
+uint64_t DebugController::StepOut() { return StepCommand("rtr"); }
 
-uint64_t DebugController::StepOut() {
-    if (!IsPaused()) {
-        throw DebuggerNotPausedException();
-    }
-    
-    Logger::Debug("Executing step out");
-    
-    if (!ExecuteCommand("rtr")) {
-        throw MCPException("Step out failed");
-    }
-    
-    if (!WaitForPause()) {
-        throw OperationTimeoutException("Step out timeout");
-    }
-    
-    // 给 x64dbg 一点时间更新寄存器状态
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    
-    return GetInstructionPointer();
+bool DebugController::WaitForNewPause(uint64_t previousSequence, uint32_t timeoutMs) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+    do {
+        if (!IsDebugging()) return false;
+        if (m_pauseSequence.load(std::memory_order_acquire) != previousSequence && IsPaused()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (std::chrono::steady_clock::now() < deadline);
+    return false;
 }
 
 bool DebugController::RunToAddress(uint64_t address) {
+    std::lock_guard<std::recursive_mutex> operation(m_operationMutex);
     if (!IsPaused()) {
         throw DebuggerNotPausedException();
     }
@@ -249,6 +213,7 @@ bool DebugController::RunToAddress(uint64_t address) {
 }
 
 bool DebugController::Restart() {
+    std::lock_guard<std::recursive_mutex> operation(m_operationMutex);
     // x64dbg has no "restart" script command. The GUI's Restart action
     // executes `init "<last debugged file>"` (see x64dbg's
     // MainWindow::restartDebugging). Reproduce that here.
@@ -282,6 +247,7 @@ bool DebugController::Restart() {
 bool DebugController::Init(const std::string& path,
                            const std::string& arguments,
                            const std::string& currentDir) {
+    std::lock_guard<std::recursive_mutex> operation(m_operationMutex);
     std::string resolvedPath = path;
     if (resolvedPath.empty()) {
         resolvedPath = LoadLastDebuggedPath();
@@ -389,6 +355,7 @@ bool DebugController::AttachProcess(uint32_t pid,
                                     uint32_t timeoutMs,
                                     bool useAttachBreak,
                                     bool detachIfBusy) {
+    std::lock_guard<std::recursive_mutex> operation(m_operationMutex);
     if (pid == 0) {
         Logger::Error("AttachProcess: invalid pid 0");
         return false;
@@ -523,13 +490,14 @@ std::string DebugController::LoadLastDebuggedPath() const {
 }
 
 bool DebugController::Stop() {
+    std::lock_guard<std::recursive_mutex> operation(m_operationMutex);
     if (!IsDebugging()) {
         Logger::Warning("Debugger is not running");
         return true;
     }
     
     Logger::Debug("Stopping debugger");
-    return ExecuteCommand("stop");
+    return ExecuteCommandDirect("stop");
 }
 
 bool DebugController::IsDebugging() const {
