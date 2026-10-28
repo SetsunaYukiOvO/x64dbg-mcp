@@ -118,19 +118,19 @@ bool BreakpointManager::DeleteBreakpoint(uint64_t, std::optional<BreakpointType>
     return false;
 }
 
-bool BreakpointManager::EnableBreakpoint(uint64_t) {
+bool BreakpointManager::EnableBreakpoint(uint64_t, std::optional<BreakpointType>) {
     return false;
 }
 
-bool BreakpointManager::DisableBreakpoint(uint64_t) {
+bool BreakpointManager::DisableBreakpoint(uint64_t, std::optional<BreakpointType>) {
     return false;
 }
 
-bool BreakpointManager::ToggleBreakpoint(uint64_t) {
+bool BreakpointManager::ToggleBreakpoint(uint64_t, std::optional<BreakpointType>) {
     return false;
 }
 
-std::optional<BreakpointInfo> BreakpointManager::GetBreakpoint(uint64_t) {
+std::optional<BreakpointInfo> BreakpointManager::GetBreakpoint(uint64_t, std::optional<BreakpointType>) {
     g_breakpointManagerAccessed = true;
     return std::nullopt;
 }

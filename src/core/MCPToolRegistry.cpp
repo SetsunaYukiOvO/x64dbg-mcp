@@ -402,7 +402,8 @@ void MCPToolRegistry::RegisterDefaultTools() {
         "Enable a disabled breakpoint",
         "breakpoint.enable",
         {
-            {"address", "string", "Breakpoint address", true, nullptr, nullptr}
+            {"address", "string", "Breakpoint address", true, nullptr, nullptr},
+            {"type", "string", "Breakpoint type (default priority: software, hardware, memory)", false, nullptr, json::array({"software", "hardware", "memory"})}
         }
     });
     
@@ -411,7 +412,8 @@ void MCPToolRegistry::RegisterDefaultTools() {
         "Disable a breakpoint without removing it",
         "breakpoint.disable",
         {
-            {"address", "string", "Breakpoint address", true, nullptr, nullptr}
+            {"address", "string", "Breakpoint address", true, nullptr, nullptr},
+            {"type", "string", "Breakpoint type (default priority: software, hardware, memory)", false, nullptr, json::array({"software", "hardware", "memory"})}
         }
     });
     
@@ -541,7 +543,8 @@ void MCPToolRegistry::RegisterDefaultTools() {
         "Get detailed information about a breakpoint",
         "breakpoint.get",
         {
-            {"address", "string", "Breakpoint address", true, nullptr, nullptr}
+            {"address", "string", "Breakpoint address", true, nullptr, nullptr},
+            {"type", "string", "Breakpoint type (default priority: software, hardware, memory)", false, nullptr, json::array({"software", "hardware", "memory"})}
         }
     });
     
@@ -557,7 +560,8 @@ void MCPToolRegistry::RegisterDefaultTools() {
         "Toggle breakpoint state (enabled/disabled)",
         "breakpoint.toggle",
         {
-            {"address", "string", "Breakpoint address", true, nullptr, nullptr}
+            {"address", "string", "Breakpoint address", true, nullptr, nullptr},
+            {"type", "string", "Breakpoint type (default priority: software, hardware, memory)", false, nullptr, json::array({"software", "hardware", "memory"})}
         }
     });
     

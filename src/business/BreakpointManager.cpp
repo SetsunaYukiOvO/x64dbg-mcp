@@ -311,51 +311,39 @@ bool BreakpointManager::DeleteBreakpoint(uint64_t address, std::optional<Breakpo
     return success;
 }
 
-bool BreakpointManager::EnableBreakpoint(uint64_t address) {
-    if (!DebugController::Instance().IsDebugging()) {
-        throw DebuggerNotRunningException();
-    }
-    
-    // x64dbg SDK doesn't have EnableBreakpoint API
-    // As a workaround, re-set the breakpoint
-    if (!Script::Debug::SetBreakpoint(address)) {
-        Logger::Error("Failed to enable breakpoint at 0x{:X}", address);
-        return false;
-    }
-    
-    Logger::Debug("Breakpoint enabled at 0x{:X}", address);
-    return true;
+bool BreakpointManager::EnableBreakpoint(uint64_t address, std::optional<BreakpointType> type) {
+    const auto bp = GetBreakpoint(address, type);
+    if (!bp) throw ResourceNotFoundException("No matching breakpoint at address");
+    const char* verb = bp->type == BreakpointType::Software ? "bpe" :
+                       bp->type == BreakpointType::Hardware ? "bphe" : "bpme";
+    const std::string command = std::string(verb) + " " + StringUtils::FormatAddress(address);
+    if (!DbgCmdExecDirect(command.c_str())) return false;
+    const auto updated = GetBreakpoint(address, bp->type);
+    return updated && updated->enabled;
 }
 
-bool BreakpointManager::DisableBreakpoint(uint64_t address) {
-    if (!DebugController::Instance().IsDebugging()) {
-        throw DebuggerNotRunningException();
-    }
-    
-    if (!Script::Debug::DisableBreakpoint(address)) {
-        Logger::Error("Failed to disable breakpoint at 0x{:X}", address);
-        return false;
-    }
-    
-    Logger::Debug("Breakpoint disabled at 0x{:X}", address);
-    return true;
+bool BreakpointManager::DisableBreakpoint(uint64_t address, std::optional<BreakpointType> type) {
+    const auto bp = GetBreakpoint(address, type);
+    if (!bp) throw ResourceNotFoundException("No matching breakpoint at address");
+    const char* verb = bp->type == BreakpointType::Software ? "bpd" :
+                       bp->type == BreakpointType::Hardware ? "bphd" : "bpmd";
+    const std::string command = std::string(verb) + " " + StringUtils::FormatAddress(address);
+    if (!DbgCmdExecDirect(command.c_str())) return false;
+    const auto updated = GetBreakpoint(address, bp->type);
+    return updated && !updated->enabled;
 }
 
-bool BreakpointManager::ToggleBreakpoint(uint64_t address) {
-    auto bp = GetBreakpoint(address);
-    if (!bp.has_value()) {
-        // 如果断点不存在,创建一个新的软件断点
+bool BreakpointManager::ToggleBreakpoint(uint64_t address, std::optional<BreakpointType> type) {
+    const auto bp = GetBreakpoint(address, type);
+    if (!bp) {
+        if (type && *type != BreakpointType::Software)
+            throw ResourceNotFoundException("No matching breakpoint at address");
         return SetSoftwareBreakpoint(address);
     }
-    
-    if (bp->enabled) {
-        return DisableBreakpoint(address);
-    } else {
-        return EnableBreakpoint(address);
-    }
+    return bp->enabled ? DisableBreakpoint(address, bp->type) : EnableBreakpoint(address, bp->type);
 }
 
-std::optional<BreakpointInfo> BreakpointManager::GetBreakpoint(uint64_t address) {
+std::optional<BreakpointInfo> BreakpointManager::GetBreakpoint(uint64_t address, std::optional<BreakpointType> typeFilter) {
     if (!DebugController::Instance().IsDebugging()) {
         throw DebuggerNotRunningException();
     }
@@ -364,7 +352,7 @@ std::optional<BreakpointInfo> BreakpointManager::GetBreakpoint(uint64_t address)
     // Deterministic priority for same-address queries: software, hardware, memory.
     for (const auto type : {BreakpointType::Software, BreakpointType::Hardware, BreakpointType::Memory})
         for (const auto& bp : breakpoints)
-            if (bp.address == address && bp.type == type) return bp;
+            if (bp.address == address && bp.type == type && (!typeFilter || type == *typeFilter)) return bp;
     return std::nullopt;
 }
 
