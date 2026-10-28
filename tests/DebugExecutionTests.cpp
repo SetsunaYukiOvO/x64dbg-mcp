@@ -19,14 +19,16 @@ bool DbgIsDebugging() { return true; }
 bool DbgIsRunning() { return g_running; }
 duint DbgValFromString(const char*) { return ip; }
 bool DbgMemIsValidReadPtr(duint) { return true; }
-HANDLE DbgGetProcessHandle() { return GetCurrentProcess(); }
+HANDLE DbgGetProcessHandle() { static HANDLE process = OpenProcess(PROCESS_ALL_ACCESS, FALSE, GetCurrentProcessId()); return process; }
 bool DbgCmdExec(const char*) { return false; } // Steps must not use the queue.
-bool DbgCmdExecDirect(const char*) {
-    pending = std::async(std::launch::async, [] {
+bool DbgCmdExecDirect(const char* command) {
+    const std::string text(command);
+    const duint target = text.rfind("run 0x", 0) == 0 ? static_cast<duint>(std::stoull(text.substr(6), nullptr, 16)) : 0;
+    pending = std::async(std::launch::async, [target] {
         // The old paused state remains visible until the queued work starts.
         std::this_thread::sleep_for(std::chrono::milliseconds(35));
         g_running = true;
-        ++ip;
+        if (target) ip = target; else ++ip;
         ++completed;
         g_running = false;
         MCP::DebugController::Instance().NotifyPaused();
@@ -55,6 +57,10 @@ int main() {
     auto second = std::async(std::launch::async, [&] { return controller.StepOver(); });
     const auto a = first.get(), b = second.get();
     if (completed != 5 || a == b || ip != 0x1005) return 4;
+    void* target = VirtualAlloc(nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+    if (!target) return 5;
+    if (!controller.RunToAddress(reinterpret_cast<uintptr_t>(target)) || completed != 6) return 6;
+    VirtualFree(target, 0, MEM_RELEASE);
     pending.get();
     return 0;
 }

@@ -187,15 +187,13 @@ bool DebugController::RunToAddress(uint64_t address) {
     }
     
     char command[64];
-    sprintf_s(command, "rtu %llX", address);
+    sprintf_s(command, "run 0x%llX", address);
     
     Logger::Debug("Executing run to address: 0x{:X}", address);
-    if (!ExecuteCommand(command)) {
-        return false;
-    }
-
-    if (!WaitForPause(10000)) {
-        Logger::Warning("RunToAddress timed out waiting for pause at target 0x{:X}", address);
+    const uint64_t sequence = m_pauseSequence.load(std::memory_order_acquire);
+    if (!ExecuteCommandDirect(command)) return false;
+    if (!WaitForNewPause(sequence, 10000)) {
+        Logger::Warning("RunToAddress timed out waiting for target 0x{:X}", address);
         return false;
     }
 
