@@ -52,6 +52,15 @@ nlohmann::json BreakpointHandler::Set(const nlohmann::json& params) {
         throw InvalidParamsException("Memory breakpoint size requires type=memory");
     }
 
+    if (params.contains("condition")) {
+        if (!params["condition"].is_string()) {
+            throw InvalidParamsException("Breakpoint condition must be a string");
+        }
+        if (!PermissionChecker::Instance().IsScriptExecutionAllowed()) {
+            throw PermissionDeniedException("Conditional breakpoints require script execution permission");
+        }
+    }
+
     auto& manager = BreakpointManager::Instance();
     bool success = false;
     
@@ -138,7 +147,9 @@ nlohmann::json BreakpointHandler::Set(const nlohmann::json& params) {
     // 濡傛灉鏈夋潯浠?璁剧疆鏉′欢
     if (params.contains("condition")) {
         std::string condition = params["condition"].get<std::string>();
-        manager.SetCondition(address, condition);
+        if (!manager.SetCondition(address, condition)) {
+            throw MCPException("Breakpoint created but condition could not be applied");
+        }
     }
     
     // 鏋勫缓鍝嶅簲

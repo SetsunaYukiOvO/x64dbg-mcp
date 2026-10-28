@@ -16,6 +16,7 @@
 namespace {
 
 bool g_breakpointManagerAccessed = false;
+bool g_scriptAllowed = true;
 std::unordered_map<std::string, MCP::MethodHandler> g_handlers;
 
 const MCP::MethodHandler& GetBreakpointHandler(const std::string& method = "breakpoint.get") {
@@ -87,7 +88,7 @@ bool PermissionChecker::IsBreakpointModificationAllowed() const {
 }
 
 bool PermissionChecker::IsScriptExecutionAllowed() const {
-    return true;
+    return g_scriptAllowed;
 }
 
 BreakpointManager& BreakpointManager::Instance() {
@@ -96,7 +97,8 @@ BreakpointManager& BreakpointManager::Instance() {
 }
 
 bool BreakpointManager::SetSoftwareBreakpoint(uint64_t, const std::string&) {
-    return false;
+    g_breakpointManagerAccessed = true;
+    return true;
 }
 
 bool BreakpointManager::SetHardwareBreakpoint(
@@ -176,6 +178,23 @@ int main() {
         return 4;
     }
 
+    g_scriptAllowed = false;
+    for (const auto* type : {"software", "hardware", "memory"}) {
+        g_breakpointManagerAccessed = false;
+        try {
+            GetBreakpointHandler("breakpoint.set")({{"address", "0x1000"}, {"type", type}, {"condition", "1"}});
+            return 5;
+        } catch (const MCP::PermissionDeniedException&) {
+            if (g_breakpointManagerAccessed) return 6;
+        }
+    }
+    g_scriptAllowed = true;
+    try {
+        GetBreakpointHandler("breakpoint.set")({{"address", "0x1000"}, {"condition", "1"}});
+        return 7;
+    } catch (const MCP::MCPException& ex) {
+        if (std::string(ex.what()).find("condition could not be applied") == std::string::npos) return 8;
+    }
     return 0;
 #endif
 }
