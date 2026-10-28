@@ -223,6 +223,7 @@ std::vector<MemorySearchResult> MemoryManager::Search(
         }
         
         // 检查地址范围
+        if (region.size > UINT64_MAX - region.base) continue;
         uint64_t regionEnd = region.base + region.size;
         if (startAddress > 0 && regionEnd <= startAddress) continue;
         if (endAddress > 0 && region.base >= endAddress) continue;
@@ -246,14 +247,18 @@ std::vector<MemorySearchResult> MemoryManager::Search(
         
         // 分块读取并搜索
         const size_t chunkSize = 64 * 1024; // 64KB chunks
+        std::vector<uint8_t> carry;
         for (uint64_t addr = searchStart; addr < searchEnd && results.size() < maxResults; ) {
             size_t readSize = std::min<size_t>(chunkSize, searchEnd - addr);
             if (readSize == 0) break;
             
             try {
                 // 读取内存块
-                std::vector<uint8_t> buffer(readSize);
-                if (!DbgMemRead(addr, buffer.data(), readSize)) {
+                const size_t prefix = carry.size();
+                std::vector<uint8_t> buffer = carry;
+                buffer.resize(prefix + readSize);
+                if (!DbgMemRead(addr, buffer.data() + prefix, readSize)) {
+                    carry.clear();
                     // 读取失败，跳过此块
                     addr += readSize;
                     continue;
@@ -263,7 +268,7 @@ std::vector<MemorySearchResult> MemoryManager::Search(
                 for (size_t i = 0; i + patternBytes.size() <= buffer.size() && results.size() < maxResults; ++i) {
                     if (MatchPattern(buffer.data() + i, patternBytes, mask)) {
                         MemorySearchResult match;
-                        match.address = addr + i;
+                        match.address = addr - prefix + i;
                         match.data.assign(buffer.begin() + i, 
                                         buffer.begin() + i + patternBytes.size());
                         results.push_back(match);
@@ -271,9 +276,12 @@ std::vector<MemorySearchResult> MemoryManager::Search(
                     }
                 }
                 
+                const size_t overlap = std::min(patternBytes.size() - 1, buffer.size());
+                carry.assign(buffer.end() - overlap, buffer.end());
                 addr += readSize;
             } catch (...) {
-                // 读取失败，跳过此块
+                // Failed reads break contiguity; do not match across inaccessible data.
+                carry.clear();
                 addr += readSize;
             }
         }
