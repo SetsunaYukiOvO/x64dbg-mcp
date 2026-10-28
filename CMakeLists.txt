@@ -95,6 +95,7 @@ set(BUSINESS_SOURCES
     src/business/StackManager.cpp
     src/business/ThreadManager.cpp
     src/business/DumpManager.cpp
+    src/business/PEDump.cpp
 )
 
 set(HANDLER_SOURCES

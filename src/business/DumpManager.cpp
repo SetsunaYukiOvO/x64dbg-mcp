@@ -834,39 +834,6 @@ std::vector<MemoryRegionDump> DumpManager::GetDumpableRegions(uint64_t moduleBas
     return regions;
 }
 
-bool DumpManager::RebuildPEHeaders(uint64_t moduleBase, std::vector<uint8_t>& buffer,
-                                   std::optional<uint32_t> newEP) {
-    try {
-        const auto layout = ValidatePELayout(buffer);
-        if (!layout) return false;
-        auto* ntHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(buffer.data() + layout->ntOffset);
-
-        // 淇鍏ュ彛鐐?
-        if (newEP.has_value()) {
-            ntHeaders->OptionalHeader.AddressOfEntryPoint = newEP.value();
-            Logger::Info("Updated entry point to RVA: {}",
-                         StringUtils::FormatAddress(newEP.value()));
-        }
-        
-        // 淇ImageBase
-        // Use PE-standard default ImageBase instead of ASLR runtime address
-#ifdef XDBG_ARCH_X64
-        ntHeaders->OptionalHeader.ImageBase = 0x0000000140000000ULL;
-#else
-        ntHeaders->OptionalHeader.ImageBase = 0x00400000UL;
-#endif
-
-        // 瀵归綈鑺?
-        AlignPESections(buffer);
-        
-        Logger::Info("PE headers rebuilt successfully");
-        return true;
-        
-    } catch (const std::exception& e) {
-        Logger::Error("Failed to rebuild PE headers: {}", e.what());
-        return false;
-    }
-}
 
 void DumpManager::SetOEPDetectionStrategy(
     std::function<std::optional<uint64_t>(uint64_t)> strategy) {
@@ -901,9 +868,6 @@ std::optional<uint64_t> DumpManager::ParseModuleOrAddress(const std::string& inp
     return std::nullopt;
 }
 
-bool DumpManager::ValidatePEHeader(const std::vector<uint8_t>& buffer) {
-    return ValidatePELayout(buffer).has_value();
-}
 
 bool DumpManager::IsPacked(uint64_t moduleBase, std::string& packerId) {
     try {
@@ -1243,81 +1207,7 @@ std::optional<uint64_t> DumpManager::DetectOEPByPattern(uint64_t moduleBase) {
     return std::nullopt;
 }
 
-bool DumpManager::FixPEChecksum(std::vector<uint8_t>& buffer) {
-    try {
-        const auto layout = ValidatePELayout(buffer);
-        if (!layout) return false;
-        auto* ntHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(buffer.data() + layout->ntOffset);
 
-        // 绠€鍗曞湴娓呴浂鏍￠獙鍜?
-        ntHeaders->OptionalHeader.CheckSum = 0;
-        
-        Logger::Debug("PE checksum cleared");
-        return true;
-        
-    } catch (const std::exception& e) {
-        Logger::Error("Failed to fix PE checksum: {}", e.what());
-        return false;
-    }
-}
-
-bool DumpManager::AlignPESections(std::vector<uint8_t>& buffer) {
-    try {
-        if (!ValidatePEHeader(buffer)) {
-            return false;
-        }
-        
-        auto* dosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(buffer.data());
-        auto* ntHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(buffer.data() + dosHeader->e_lfanew);
-        
-        uint32_t fileAlignment = ntHeaders->OptionalHeader.FileAlignment;
-        if (fileAlignment == 0) {
-            fileAlignment = 0x200;
-        }
-        
-        auto* sections = reinterpret_cast<IMAGE_SECTION_HEADER*>(
-            reinterpret_cast<uint8_t*>(ntHeaders) + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) + ntHeaders->FileHeader.SizeOfOptionalHeader
-        );
-
-        const auto alignUp = [](uint32_t value, uint32_t alignment) -> uint32_t {
-            if (alignment == 0) {
-                return value;
-            }
-            const uint64_t aligned = ((uint64_t(value) + alignment - 1) / alignment) * alignment;
-            return static_cast<uint32_t>(std::min<uint64_t>(aligned, UINT32_MAX));
-        };
-        
-        for (int i = 0; i < ntHeaders->FileHeader.NumberOfSections; i++) {
-            const uint32_t virtualAddress = sections[i].VirtualAddress;
-            uint32_t virtualSize = sections[i].Misc.VirtualSize;
-            if (virtualSize == 0) {
-                virtualSize = sections[i].SizeOfRawData;
-            }
-
-            // Dump buffer is in memory-image layout, so raw data must point to RVA.
-            sections[i].PointerToRawData = virtualAddress;
-            sections[i].SizeOfRawData = alignUp(virtualSize, fileAlignment);
-
-            if (virtualAddress >= buffer.size()) {
-                sections[i].PointerToRawData = 0;
-                sections[i].SizeOfRawData = 0;
-                continue;
-            }
-
-            const size_t maxAvailable = buffer.size() - static_cast<size_t>(virtualAddress);
-            if (sections[i].SizeOfRawData > maxAvailable) {
-                sections[i].SizeOfRawData = static_cast<uint32_t>(maxAvailable);
-            }
-        }
-        
-        Logger::Debug("PE sections aligned");
-        return true;
-        
-    } catch (const std::exception& e) {
-        Logger::Error("Failed to align PE sections: {}", e.what());
-        return false;
-    }
-}
 
 } // namespace MCP
 
