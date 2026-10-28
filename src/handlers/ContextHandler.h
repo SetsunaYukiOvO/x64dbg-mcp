@@ -19,7 +19,6 @@ public:
 private:
     // Helper functions
     static json captureRegisters();
-    static json captureMemoryRegions();
     static json captureBreakpoints();
     static json captureThreads();
     static json captureStack();
