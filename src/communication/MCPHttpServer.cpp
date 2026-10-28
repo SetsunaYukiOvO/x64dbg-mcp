@@ -274,7 +274,7 @@ MCPHttpServer::~MCPHttpServer() {
 bool MCPHttpServer::BroadcastNotification(const std::string& method, const nlohmann::json& params) {
     std::lock_guard<std::mutex> lock(s_activeInstanceMutex);
     MCPHttpServer* active = s_activeInstance;
-    if (!active || !active->IsRunning()) {
+    if (!active || !active->IsRunning() || !ConfigManager::Instance().Get<bool>("features.enable_notifications", true)) {
         return false;
     }
 
@@ -716,7 +716,7 @@ void MCPHttpServer::HandleSSE(SOCKET clientSocket, const std::string& origin) {
     // 璇诲彇瀹㈡埛绔彂閫佺殑娑堟伅锛堟湁浜?MCP 瀹㈡埛绔€氳繃 SSE 杩炴帴鍙戦€佽姹傦級
     char buffer[4096];
     std::string accumulated;
-    int heartbeatCounter = 0;
+    auto nextHeartbeat = std::chrono::steady_clock::now();
     
     while (m_running) {
         int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
@@ -800,9 +800,10 @@ void MCPHttpServer::HandleSSE(SOCKET clientSocket, const std::string& origin) {
         }
         
         // 姣?15 绉掑彂閫佷竴娆″績璺筹紙淇濇寔杩炴帴娲昏穬锛?
-        if (++heartbeatCounter >= 150) {  // 150 * 100ms = 15s
-            SendSSEEvent(clientSocket, "ping", "{}");
-            heartbeatCounter = 0;
+        auto& config = ConfigManager::Instance();
+        if (std::chrono::steady_clock::now() - nextHeartbeat >= std::chrono::seconds(config.GetHeartbeatInterval())) {
+            if (config.Get<bool>("features.enable_heartbeat", true) && !SendSSEEvent(clientSocket, "ping", "{}")) break;
+            nextHeartbeat = std::chrono::steady_clock::now();
         }
         
         // 鐭殏浼戠湢閬垮厤 CPU 鍗犵敤杩囬珮
@@ -820,30 +821,6 @@ void MCPHttpServer::HandleSSE(SOCKET clientSocket, const std::string& origin) {
 
 void MCPHttpServer::HandlePostMessage(SOCKET clientSocket, const std::string& body,
                                       const std::string& origin, const std::string& sessionId) {
-    Logger::Debug("POST body received: " + body);
-
-    try {
-        [[maybe_unused]] const auto parsed = json::parse(body);
-    } catch (const json::exception&) {
-        Logger::Error("Failed to parse JSON body");
-        SendHttpResponse(clientSocket, 400,
-                         "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Parse error\"}}",
-                         "application/json", origin);
-        return;
-    }
-
-    std::string method, requestId;
-    bool hasRequestId = false;
-    if (!ParseJsonRpcRequest(body, method, requestId, hasRequestId)) {
-        Logger::Error("Invalid JSON-RPC request");
-        SendHttpResponse(clientSocket, 400,
-                         "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Invalid Request\"}}",
-                         "application/json", origin);
-        return;
-    }
-
-    Logger::Info("MCP Method: " + method + ", ID: " + requestId);
-
     // Validate a legacy session before dispatching a potentially mutating request.
     if (!sessionId.empty()) {
         std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
@@ -854,10 +831,8 @@ void MCPHttpServer::HandlePostMessage(SOCKET clientSocket, const std::string& bo
         }
     }
 
-    std::string response = HandleMCPMethod(method, requestId, body);
-
-    // Notification (no id) or methods with no payload: 202 either way.
-    if (!hasRequestId || response.empty()) {
+    const std::string response = HandleMCPBody(body);
+    if (response.empty()) {
         SendHttpResponse(clientSocket, 202, "", "application/json", origin);
         return;
     }
@@ -875,6 +850,39 @@ void MCPHttpServer::HandlePostMessage(SOCKET clientSocket, const std::string& bo
         Logger::Debug("Inline reply (no SSE client): " + response);
         SendHttpResponse(clientSocket, 200, response, "application/json", origin);
     }
+}
+
+std::string MCPHttpServer::HandleMCPBody(const std::string& body) {
+    const auto error = [](int code, const char* message) {
+        return json{{"jsonrpc", "2.0"}, {"id", nullptr}, {"error", {{"code", code}, {"message", message}}}};
+    };
+    json input;
+    try { input = json::parse(body); }
+    catch (const json::exception&) { return error(-32700, "Parse error").dump(); }
+    const bool batch = input.is_array();
+    if (batch && (!ConfigManager::Instance().Get<bool>("features.enable_batch_requests", true) || input.empty() || input.size() > 128))
+        return error(-32600, "Batch requests disabled, empty, or too large").dump();
+    const json items = batch ? input : json::array({input});
+    json responses = json::array();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ConfigManager::Instance().GetRequestTimeout());
+    for (const auto& item : items) {
+        std::string method, id;
+        bool hasId = false;
+        const std::string raw = item.dump();
+        if (!ParseJsonRpcRequest(raw, method, id, hasId)) { responses.push_back(error(-32600, "Invalid Request")); continue; }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            if (hasId) {
+                auto timeout = error(-32005, "Request timeout"); timeout["id"] = SafeParseId(id); responses.push_back(timeout);
+            }
+            continue;
+        }
+        const auto response = HandleMCPMethod(method, id, raw);
+        if (hasId && std::chrono::steady_clock::now() >= deadline) {
+            auto timeout = error(-32005, "Request timeout"); timeout["id"] = SafeParseId(id); responses.push_back(timeout);
+        } else if (hasId && !response.empty()) responses.push_back(json::parse(response));
+    }
+    if (responses.empty()) return "";
+    return batch ? responses.dump() : responses.front().dump();
 }
 
 bool MCPHttpServer::ParseJsonRpcRequest(const std::string& rawJson,
@@ -1476,35 +1484,8 @@ MCPHttpServer::MCPToolCallResult MCPHttpServer::CallMCPTool(const std::string& t
 // =============================================================================
 
 void MCPHttpServer::HandleStreamableHttpPost(SOCKET clientSocket, const std::string& body, const std::string& origin) {
-    Logger::Debug("[Streamable HTTP] POST body: " + body);
-
-    try {
-        [[maybe_unused]] const auto parsed = nlohmann::json::parse(body);
-    } catch (const nlohmann::json::exception&) {
-        Logger::Error("[Streamable HTTP] Failed to parse JSON body");
-        SendHttpResponse(clientSocket, 400,
-            "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32700,\"message\":\"Parse error\"}}",
-            "application/json", origin);
-        return;
-    }
-
-    std::string method;
-    std::string requestId;
-    bool hasRequestId = false;
-    if (!ParseJsonRpcRequest(body, method, requestId, hasRequestId)) {
-        Logger::Error("[Streamable HTTP] Invalid JSON-RPC request");
-        SendHttpResponse(clientSocket, 400,
-            "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"Invalid Request\"}}",
-            "application/json", origin);
-        return;
-    }
-
-    Logger::Info("[Streamable HTTP] Method: " + method + ", ID: " + requestId);
-
-    std::string response = HandleMCPMethod(method, requestId, body);
-
-    if (!hasRequestId || response.empty()) {
-        // Notification (no id) or fire-and-forget method: 202 Accepted, no body.
+    const std::string response = HandleMCPBody(body);
+    if (response.empty()) {
         SendHttpResponse(clientSocket, 202, "", "application/json", origin);
         return;
     }
@@ -1542,7 +1523,7 @@ void MCPHttpServer::HandleStreamableHttpStream(SOCKET clientSocket,
     ioctlsocket(clientSocket, FIONBIO, &mode);
 
     char buffer[256];
-    int heartbeatCounter = 0;
+    auto nextHeartbeat = std::chrono::steady_clock::now();
 
     while (m_running) {
         const int bytesReceived = recv(clientSocket, buffer, sizeof(buffer), 0);
@@ -1559,14 +1540,15 @@ void MCPHttpServer::HandleStreamableHttpStream(SOCKET clientSocket,
         }
 
         // SSE comment line as a no-op heartbeat (~15s).
-        if (++heartbeatCounter >= 150) {
+        if (std::chrono::steady_clock::now() - nextHeartbeat >= std::chrono::seconds(ConfigManager::Instance().GetHeartbeatInterval()) &&
+            ConfigManager::Instance().Get<bool>("features.enable_heartbeat", true)) {
             const std::string ping = ": ping\r\n\r\n";
             std::lock_guard<std::mutex> lock(m_sseSendMutex);
             if (!SendAll(clientSocket, ping)) {
                 Logger::Debug("[Streamable HTTP] Heartbeat send failed, closing");
                 break;
             }
-            heartbeatCounter = 0;
+            nextHeartbeat = std::chrono::steady_clock::now();
         }
 
         Sleep(100);

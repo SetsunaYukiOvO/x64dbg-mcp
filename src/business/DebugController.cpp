@@ -1,6 +1,7 @@
 #include "DebugController.h"
 #include "ThreadManager.h"
 #include "../core/Logger.h"
+#include "../core/ConfigManager.h"
 #include "../core/Exceptions.h"
 #include "../core/TargetValueValidator.h"
 #include "../core/X64DBGBridge.h"
@@ -142,7 +143,7 @@ bool DebugController::Pause() {
         return false;
     }
 
-    return WaitForPause(5000);
+    return WaitForPause(ConfigManager::Instance().GetRequestTimeout());
 }
 
 uint64_t DebugController::StepCommand(const std::string& command) {
@@ -151,7 +152,7 @@ uint64_t DebugController::StepCommand(const std::string& command) {
     const uint64_t sequence = m_pauseSequence.load(std::memory_order_acquire);
     // Direct execution checks acceptance before waiting; enqueue success is insufficient.
     if (!ExecuteCommandDirect(command)) throw MCPException("Step command failed: " + command);
-    if (!WaitForNewPause(sequence, 5000)) throw OperationTimeoutException("Step command timed out: " + command);
+    if (!WaitForNewPause(sequence, ConfigManager::Instance().GetStepTimeout())) throw OperationTimeoutException("Step command timed out: " + command);
     return GetInstructionPointer();
 }
 
@@ -192,7 +193,7 @@ bool DebugController::RunToAddress(uint64_t address) {
     Logger::Debug("Executing run to address: 0x{:X}", address);
     const uint64_t sequence = m_pauseSequence.load(std::memory_order_acquire);
     if (!ExecuteCommandDirect(command)) return false;
-    if (!WaitForNewPause(sequence, 10000)) {
+    if (!WaitForNewPause(sequence, ConfigManager::Instance().GetRequestTimeout())) {
         Logger::Warning("RunToAddress timed out waiting for target 0x{:X}", address);
         return false;
     }
@@ -395,7 +396,7 @@ bool DebugController::AttachProcess(uint32_t pid,
             Logger::Error("AttachProcess: mcpdetach enqueue failed");
             return false;
         }
-        const uint32_t waitMs = timeoutMs > 0 ? timeoutMs : 15000;
+        const uint32_t waitMs = timeoutMs > 0 ? timeoutMs : ConfigManager::Instance().GetRequestTimeout();
         auto start = std::chrono::steady_clock::now();
         while (IsDebugging()) {
             PumpGuiMessages();
@@ -418,7 +419,7 @@ bool DebugController::AttachProcess(uint32_t pid,
         return false;
     }
 
-    const uint32_t waitMs = timeoutMs > 0 ? timeoutMs : 30000;
+    const uint32_t waitMs = timeoutMs > 0 ? timeoutMs : ConfigManager::Instance().GetRequestTimeout();
     if (!WaitForDebugging(waitMs)) {
         Logger::Error("AttachProcess: DbgIsDebugging still false after {} ms", waitMs);
         return false;

@@ -81,6 +81,7 @@ private:
     void HandleStreamableHttpStream(SOCKET clientSocket, const std::string& origin);
     
     // 处理 MCP 方法调用
+    std::string HandleMCPBody(const std::string& body);
     std::string HandleMCPMethod(const std::string& method, const std::string& requestId, const std::string& body);
     
     // 解析 JSON-RPC 请求

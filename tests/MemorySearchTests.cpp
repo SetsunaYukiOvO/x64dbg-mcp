@@ -1,16 +1,22 @@
 #include "business/MemoryManager.h"
 #include "business/DebugController.h"
 #include "core/Logger.h"
+#include "core/ConfigManager.h"
+#include "core/Exceptions.h"
+#include <thread>
+#include <chrono>
 #include "core/X64DBGBridge.h"
 #include <cstdlib>
 #include <cstring>
 namespace {
 std::vector<uint8_t> memory(3 * 65536, 0);
 bool failMiddle = false;
+bool delayRead = false;
 constexpr duint base = 0x10000;
 }
 extern "C" {
 bool DbgMemRead(duint address, void* out, duint size) {
+    if (delayRead) std::this_thread::sleep_for(std::chrono::milliseconds(5));
     if (address < base || size > memory.size() || address - base > memory.size() - size) return false;
     if (failMiddle && address == base + 65536) return false;
     std::memcpy(out, memory.data() + (address - base), size); return true;
@@ -47,5 +53,9 @@ int main() {
     if (manager.Search("AA BB", 0, 0, 1).size() != 1) return 3;
     failMiddle = true;
     if (manager.Search("AA BB").size() != 1) return 4;
+    MCP::ConfigManager::Instance().Set("timeout.memory_read_timeout_ms", 1);
+    delayRead = true;
+    try { manager.Read(base, 16); return 5; }
+    catch (const MCP::OperationTimeoutException&) {}
     return 0;
 }

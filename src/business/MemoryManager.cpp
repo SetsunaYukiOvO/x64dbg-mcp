@@ -6,6 +6,8 @@
 #include "../utils/StringUtils.h"
 #include "../core/X64DBGBridge.h"
 #include <algorithm>
+#include <chrono>
+#include "../core/ConfigManager.h"
 
 namespace MCP {
 
@@ -49,36 +51,21 @@ std::vector<uint8_t> MemoryManager::Read(uint64_t address, size_t size) {
     
     std::vector<uint8_t> buffer(size);
     
-    // 尝试读取完整大小
-    if (DbgMemRead(address, buffer.data(), size)) {
-        Logger::Trace("Read {} bytes from 0x{:X}", size, address);
-        return buffer;
-    }
-    
-    // 如果失败，尝试分块读取（处理跨页边界的情况）
-    Logger::Debug("Full read failed, attempting chunked read for {} bytes from 0x{:X}", size, address);
-    
-    size_t chunkSize = 4096; // 4KB chunks
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(ConfigManager::Instance().GetMemoryReadTimeout());
+    constexpr size_t chunkSize = 4096;
     size_t totalRead = 0;
-    
     for (size_t offset = 0; offset < size; offset += chunkSize) {
-        size_t currentChunkSize = std::min(chunkSize, size - offset);
-        uint64_t currentAddr = address + offset;
-        
-        // 检查当前块是否可读
-        if (!DbgMemIsValidReadPtr(currentAddr)) {
-            Logger::Warning("Memory not readable at chunk starting at 0x{:X}", currentAddr);
-            break;
-        }
-        
-        if (DbgMemRead(currentAddr, buffer.data() + offset, currentChunkSize)) {
-            totalRead += currentChunkSize;
-        } else {
-            Logger::Warning("Failed to read chunk at 0x{:X}, size {}", currentAddr, currentChunkSize);
-            break;
-        }
+        if (std::chrono::steady_clock::now() >= deadline)
+            throw OperationTimeoutException("Memory read timeout");
+        const size_t currentChunkSize = std::min(chunkSize, size - offset);
+        const uint64_t currentAddr = address + offset;
+        if (!DbgMemIsValidReadPtr(currentAddr) || !DbgMemRead(currentAddr, buffer.data() + offset, currentChunkSize)) break;
+        totalRead += currentChunkSize;
     }
-    
+    if (std::chrono::steady_clock::now() >= deadline)
+        throw OperationTimeoutException("Memory read timeout");
+
     if (totalRead == 0) {
         throw MCPException("Failed to read memory at: " +
                           StringUtils::FormatAddress(address));

@@ -1,3 +1,4 @@
+#include "../core/ConfigManager.h"
 #include "../core/UInt32Validation.h"
 #include "DebugHandler.h"
 #include "../business/DebugController.h"
@@ -222,7 +223,7 @@ json DebugHandler::AttachPid(const json& params) {
 
     bool useAttachBreak = RequestValidator::GetBoolean(params, "attach_break", false);
     bool detachFirst = RequestValidator::GetBoolean(params, "detach_first", true);
-    const uint32_t timeoutMs = ValidateUInt32(params.value("timeout_ms", json(15000)), "timeout_ms");
+    const uint32_t timeoutMs = ValidateUInt32(params.value("timeout_ms", json(ConfigManager::Instance().GetRequestTimeout())), "timeout_ms");
 
     auto& controller = DebugController::Instance();
     const bool success = controller.AttachProcess(

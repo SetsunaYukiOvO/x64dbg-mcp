@@ -159,6 +159,10 @@ target_compile_options(hex_bytes PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 add_test(NAME hex_bytes COMMAND hex_bytes)
 
 foreach(arch x64 x86)
+    # The native 32-bit SDK has no r8-r15 fields; do not simulate an x64 register dump with it.
+    if(XDBG_ARCH STREQUAL "x86" AND arch STREQUAL "x64")
+        continue()
+    endif()
     string(TOUPPER ${arch} arch_upper)
     add_executable(general_registers_${arch} GeneralRegistersTests.cpp ${CMAKE_SOURCE_DIR}/src/business/RegisterManager.cpp)
     target_include_directories(general_registers_${arch} PRIVATE ${CMAKE_SOURCE_DIR}/src ${XDBG_BUNDLED_SDK_DIR})
@@ -194,3 +198,26 @@ target_include_directories(symbol_ownership PRIVATE ${CMAKE_SOURCE_DIR}/src ${XD
 target_compile_definitions(symbol_ownership PRIVATE XDBG_SDK_AVAILABLE NOMINMAX WIN32_LEAN_AND_MEAN BRIDGE_IMPEXP= PLUG_IMPEXP=)
 target_compile_options(symbol_ownership PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 add_test(NAME symbol_ownership COMMAND symbol_ownership)
+
+target_sources(debug_execution PRIVATE ${CMAKE_SOURCE_DIR}/src/core/ConfigManager.cpp)
+target_link_libraries(debug_execution PRIVATE nlohmann_json::nlohmann_json)
+target_sources(memory_search PRIVATE ${CMAKE_SOURCE_DIR}/src/core/ConfigManager.cpp)
+target_link_libraries(memory_search PRIVATE nlohmann_json::nlohmann_json)
+
+add_executable(runtime_configuration RuntimeConfigurationTests.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/ConfigManager.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/Logger.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/PermissionChecker.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/RequestValidator.cpp
+    ${CMAKE_SOURCE_DIR}/src/handlers/PatchHandler.cpp
+    ${CMAKE_SOURCE_DIR}/src/handlers/EventCallbackHandler.cpp)
+target_include_directories(runtime_configuration PRIVATE ${CMAKE_SOURCE_DIR}/src ${XDBG_BUNDLED_SDK_DIR})
+target_compile_definitions(runtime_configuration PRIVATE XDBG_SDK_AVAILABLE NOMINMAX WIN32_LEAN_AND_MEAN BRIDGE_IMPEXP= PLUG_IMPEXP=)
+if(XDBG_ARCH STREQUAL "x64")
+    target_compile_definitions(runtime_configuration PRIVATE XDBG_ARCH_X64)
+else()
+    target_compile_definitions(runtime_configuration PRIVATE XDBG_ARCH_X86)
+endif()
+target_compile_options(runtime_configuration PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+target_link_libraries(runtime_configuration PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME runtime_configuration COMMAND runtime_configuration)

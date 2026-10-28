@@ -425,6 +425,17 @@ bool ConfigEditor::SaveConfig(HWND hwndDlg, const std::string& configPath) {
         MessageBoxA(hwndDlg, "Enter a valid bind address and TCP port (1-65535).", "MCP Configuration", MB_OK | MB_ICONWARNING);
         return false;
     }
+    const auto validRange = [](const json& value, uint64_t maximum) {
+        return value.is_number_integer() && value >= 1 && value <= maximum;
+    };
+    if (!validRange(config["timeout"]["request_timeout_ms"], 3600000) ||
+        !validRange(config["timeout"]["step_timeout_ms"], 3600000) ||
+        !validRange(config["timeout"]["memory_read_timeout_ms"], 3600000) ||
+        !validRange(config["features"]["heartbeat_interval_seconds"], 86400) ||
+        !validRange(config["logging"]["max_file_size_mb"], 1024)) {
+        MessageBoxA(hwndDlg, "Timeouts: 1-3600000 ms; heartbeat: 1-86400 s; log size: 1-1024 MB.", "MCP Configuration", MB_OK | MB_ICONWARNING);
+        return false;
+    }
     if (config["security"]["auth_enabled"].get<bool>() && config["security"]["auth_token"].get<std::string>().empty()) {
         MessageBoxA(hwndDlg, "Bearer authentication requires a non-empty token.", "MCP Configuration", MB_OK | MB_ICONWARNING);
         return false;

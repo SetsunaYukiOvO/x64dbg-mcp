@@ -66,6 +66,9 @@ public:
     
     uint32_t GetRequestTimeout() const;
     uint32_t GetStepTimeout() const;
+    uint32_t GetMemoryReadTimeout() const;
+    uint32_t GetHeartbeatInterval() const;
+    uint32_t GetBoundedPositive(const std::string& key, uint32_t fallback, uint32_t maximum) const;
     
     /**
      * @brief 获取配置文件路径

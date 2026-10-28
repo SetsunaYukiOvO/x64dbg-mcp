@@ -42,10 +42,9 @@ std::string OpenStream(SOCKET s) {
     const auto start = data.find("/message?sessionId=");
     return data.substr(start, data.find("\r\n", start) - start);
 }
-std::string Post(const std::string& path) {
+std::string Post(const std::string& path, const std::string& body = R"({"jsonrpc":"2.0","id":73,"method":"initialize"})", const std::string& extraHeaders = "") {
     SOCKET s = Connect();
-    const std::string body = R"({"jsonrpc":"2.0","id":73,"method":"initialize"})";
-    const std::string request = "POST " + path + " HTTP/1.1\r\nHost: localhost\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
+    const std::string request = "POST " + path + " HTTP/1.1\r\nHost: localhost\r\nContent-Length: " + std::to_string(body.size()) + "\r\n" + extraHeaders + "\r\n" + body;
     send(s, request.data(), static_cast<int>(request.size()), 0);
     std::string response, part;
     while (!(part = Read(s)).empty()) response += part;
@@ -58,7 +57,8 @@ int main() {
     MCP::ConfigManager::Instance().Set("server.max_connections", 4);
     MCP::ConfigManager::Instance().Set("timeout.request_timeout_ms", 150);
     MCP::MCPHttpServer server;
-    for (port = 18300; port < 18400; ++port) if (server.Start("127.0.0.1", port)) break;
+    const int firstPort = 20000 + static_cast<int>(GetCurrentProcessId() % 20000);
+    for (port = firstPort; port < firstPort + 100; ++port) if (server.Start("127.0.0.1", port)) break;
     if (!server.IsRunning()) return 1;
     try {
         SOCKET first = Connect(), second = Connect();
@@ -68,6 +68,30 @@ int main() {
         if (Read(first).find("\"id\":73") == std::string::npos || !Read(second).empty()) return 3;
         if (Post("/rpc").find("\"id\":73") == std::string::npos) return 4;
         if (Post("/message?sessionId=unknown").find("404") == std::string::npos) return 5;
+        MCP::ConfigManager::Instance().Set("features.enable_batch_requests", false);
+        const std::string batch = R"([{"jsonrpc":"2.0","id":81,"method":"initialize"},{"jsonrpc":"2.0","method":"notifications/initialized"}])";
+        if (Post("/mcp", batch).find("-32600") == std::string::npos) return 11;
+        MCP::ConfigManager::Instance().Set("features.enable_batch_requests", true);
+        if (Post("/mcp", batch).find("\"id\":81") == std::string::npos) return 12;
+        MCP::ConfigManager::Instance().Set("features.enable_notifications", false);
+        if (MCP::MCPHttpServer::BroadcastNotification("test", json::object())) return 13;
+        MCP::ConfigManager::Instance().Set("features.enable_notifications", true);
+        if (!MCP::MCPHttpServer::BroadcastNotification("test", json::object()) || Read(first).find("test") == std::string::npos) return 14;
+        Read(second);
+        MCP::ConfigManager::Instance().Set("features.heartbeat_interval_seconds", 1);
+        MCP::ConfigManager::Instance().Set("features.enable_heartbeat", true);
+        if (Read(first).find("ping") == std::string::npos) return 15;
+        MCP::ConfigManager::Instance().Set("features.enable_heartbeat", false);
+        Read(first); // Drain any heartbeat already in flight.
+        if (!Read(first).empty()) return 16;
+        const std::string one = R"({"jsonrpc":"2.0","id":9,"method":"initialize"})";
+        if (Post("/rpc", one, "Origin: https://blocked\r\n").find("403") == std::string::npos) return 17;
+        if (Post("/rpc", one, "X-Origin: https://blocked\r\n").find("200") == std::string::npos) return 18;
+        MCP::ConfigManager::Instance().Set("security.auth_enabled", true);
+        MCP::ConfigManager::Instance().Set("security.auth_token", std::string("regression-token"));
+        if (Post("/rpc", one, "Authorization: Bearer regression-token\r\n").find("200") == std::string::npos) return 19;
+        if (Post("/rpc", one, "X-Authorization: Bearer regression-token\r\n").find("401") == std::string::npos) return 20;
+        MCP::ConfigManager::Instance().Set("security.auth_enabled", false);
         closesocket(first); closesocket(second);
         server.Stop();
         if (!server.Start("127.0.0.1", port)) return 6;
@@ -88,7 +112,18 @@ int main() {
             closesocket(socket);
         }
         if (Post("/rpc").find("200") == std::string::npos) return 9;
+        SOCKET activeStream = Connect(); OpenStream(activeStream);
+        std::atomic<bool> broadcasting{true};
+        std::thread broadcaster([&] {
+            while (broadcasting) {
+                MCP::MCPHttpServer::BroadcastNotification("shutdown-test", json::object());
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        });
         server.Stop();
+        broadcasting = false;
+        broadcaster.join();
+        closesocket(activeStream);
     } catch (const std::exception& ex) { std::cerr << ex.what(); return 10; }
     return 0;
 }

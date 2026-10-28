@@ -2,6 +2,8 @@
 #include "business/ThreadManager.h"
 #include "core/X64DBGBridge.h"
 #include "core/Logger.h"
+#include "core/ConfigManager.h"
+#include "core/Exceptions.h"
 #include <atomic>
 #include <chrono>
 #include <future>
@@ -61,6 +63,10 @@ int main() {
     if (!target) return 5;
     if (!controller.RunToAddress(reinterpret_cast<uintptr_t>(target)) || completed != 6) return 6;
     VirtualFree(target, 0, MEM_RELEASE);
+    pending.get();
+    MCP::ConfigManager::Instance().Set("timeout.step_timeout_ms", 1);
+    try { controller.StepInto(); return 7; }
+    catch (const MCP::OperationTimeoutException&) {}
     pending.get();
     return 0;
 }

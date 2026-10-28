@@ -3,6 +3,7 @@
 #include "ResponseBuilder.h"
 #include "Exceptions.h"
 #include "Logger.h"
+#include "ConfigManager.h"
 
 namespace MCP {
 
@@ -56,6 +57,12 @@ JSONRPCResponse MethodDispatcher::Dispatch(const JSONRPCRequest& request) {
 std::vector<JSONRPCResponse> MethodDispatcher::DispatchBatch(
     const std::vector<JSONRPCRequest>& requests)
 {
+    if (!ConfigManager::Instance().Get<bool>("features.enable_batch_requests", true) || requests.size() > 128) {
+        std::vector<JSONRPCResponse> rejected;
+        for (const auto& request : requests) if (!request.IsNotification())
+            rejected.push_back(ResponseBuilder::CreateErrorResponse(request.id, -32600, "Batch requests disabled or too large"));
+        return rejected;
+    }
     std::vector<JSONRPCResponse> responses;
     responses.reserve(requests.size());
     
