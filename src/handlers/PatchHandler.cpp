@@ -1,6 +1,7 @@
 #include "PatchHandler.h"
 #include "../core/MethodDispatcher.h"
 #include "../core/RequestValidator.h"
+#include "../core/PermissionChecker.h"
 #include "../core/Exceptions.h"
 #include "../core/Logger.h"
 #include "../core/X64DBGBridge.h"
@@ -46,6 +47,9 @@ nlohmann::json PatchHandler::PatchList(const nlohmann::json&) {
 }
 
 nlohmann::json PatchHandler::PatchRestore(const nlohmann::json& params) {
+    if (!PermissionChecker::Instance().IsMemoryWriteAllowed())
+        throw PermissionDeniedException("Restoring patches requires memory write permission");
+
     if (!params.contains("address"))
         throw InvalidParamsException("Missing required parameter: address");
 
