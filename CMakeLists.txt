@@ -92,6 +92,7 @@ set(BUSINESS_SOURCES
     src/business/BreakpointManager.cpp
     src/business/DisassemblyEngine.cpp
     src/business/SymbolResolver.cpp
+    src/business/SymbolLookup.cpp
     src/business/StackManager.cpp
     src/business/ThreadManager.cpp
     src/business/DumpManager.cpp
