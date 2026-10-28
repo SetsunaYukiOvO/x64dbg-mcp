@@ -84,3 +84,7 @@ add_executable(pe_validation PEValidationTests.cpp)
 target_include_directories(pe_validation PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(pe_validation PRIVATE NOMINMAX)
 add_test(NAME pe_validation COMMAND pe_validation)
+
+add_executable(http_headers HttpHeadersTests.cpp)
+target_include_directories(http_headers PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME http_headers COMMAND http_headers)

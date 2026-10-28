@@ -7,6 +7,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include "MCPHttpServer.h"
+#include "HttpHeaders.h"
 #include "../core/ConfigManager.h"
 #include "../core/Logger.h"
 #include "../core/MethodDispatcher.h"
@@ -62,26 +63,10 @@ std::string ToLowerCopy(std::string value) {
 }
 
 std::string GetHttpHeader(const std::string& request, const std::string& headerName) {
-    const size_t headerEnd = request.find("\r\n\r\n");
-    const std::string headers = (headerEnd != std::string::npos) ? request.substr(0, headerEnd) : request;
-
-    const std::string lowerHeaders = ToLowerCopy(headers);
-    const std::string search = ToLowerCopy(headerName) + ":";
-    const size_t pos = lowerHeaders.find(search);
-    if (pos == std::string::npos) {
-        return "";
-    }
-
-    size_t valueStart = pos + search.length();
-    while (valueStart < headers.size() && (headers[valueStart] == ' ' || headers[valueStart] == '\t')) {
-        valueStart++;
-    }
-    const size_t valueEnd = headers.find('\r', valueStart);
-    if (valueEnd == std::string::npos) {
-        return "";
-    }
-
-    return headers.substr(valueStart, valueEnd - valueStart);
+    HttpHeaders headers;
+    if (!ParseHttpHeaders(request, headers)) return "";
+    const auto it = headers.find(ToLowerCopy(headerName));
+    return it == headers.end() ? "" : it->second;
 }
 
 // Parse a requestId that was produced by json::dump(), falling back to null on failure.
@@ -115,44 +100,6 @@ bool ConstantTimeEquals(const std::string& left, const std::string& right) {
     return difference == 0;
 }
 
-bool ParseContentLength(const std::string& headers, size_t& outLength) {
-    std::istringstream stream(headers);
-    std::string line;
-
-    while (std::getline(stream, line)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-
-        const size_t colon = line.find(':');
-        if (colon == std::string::npos) {
-            continue;
-        }
-
-        std::string name = line.substr(0, colon);
-        TrimInPlace(name);
-        if (ToLowerCopy(name) != "content-length") {
-            continue;
-        }
-
-        std::string value = line.substr(colon + 1);
-        TrimInPlace(value);
-        if (value.empty()) {
-            return false;
-        }
-
-        try {
-            const size_t parsed = static_cast<size_t>(std::stoull(value));
-            outLength = parsed;
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-
-    return false;
-}
-
 bool ReceiveHttpRequest(SOCKET socket, std::string& request, bool& payloadTooLarge) {
     request.clear();
     payloadTooLarge = false;
@@ -178,8 +125,9 @@ bool ReceiveHttpRequest(SOCKET socket, std::string& request, bool& payloadTooLar
             headerEnd = request.find("\r\n\r\n");
             if (headerEnd != std::string::npos) {
                 const std::string headerPart = request.substr(0, headerEnd + 4);
-                if (!ParseContentLength(headerPart, contentLength)) {
-                    contentLength = 0;
+                HttpHeaders headers;
+                if (!ParseHttpHeaders(headerPart, headers) || !HttpContentLength(headers, contentLength)) {
+                    return false;
                 }
                 if (contentLength > kMaxHttpRequestSize) {
                     payloadTooLarge = true;
