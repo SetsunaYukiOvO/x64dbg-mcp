@@ -99,3 +99,8 @@ else()
 endif()
 target_compile_options(debug_execution PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 add_test(NAME debug_execution COMMAND debug_execution)
+
+add_executable(uint32_validation UInt32ValidationTests.cpp)
+target_include_directories(uint32_validation PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(uint32_validation PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME uint32_validation COMMAND uint32_validation)

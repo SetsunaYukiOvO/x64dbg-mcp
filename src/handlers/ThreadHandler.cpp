@@ -1,4 +1,5 @@
 #include "ThreadHandler.h"
+#include "../core/UInt32Validation.h"
 #include "../business/ThreadManager.h"
 #include "../core/ArchitectureRegisterNames.h"
 #include "../core/Exceptions.h"
@@ -59,7 +60,7 @@ nlohmann::json ThreadHandler::GetThread(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: thread_id");
     }
     
-    uint32_t threadId = params["thread_id"].get<uint32_t>();
+    uint32_t threadId = ValidateUInt32(params["thread_id"], "thread_id");
     
     auto& threadMgr = ThreadManager::Instance();
     auto thread = threadMgr.GetThread(threadId);
@@ -75,7 +76,7 @@ nlohmann::json ThreadHandler::SwitchThread(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: thread_id");
     }
     
-    uint32_t threadId = params["thread_id"].get<uint32_t>();
+    uint32_t threadId = ValidateUInt32(params["thread_id"], "thread_id");
     
     auto& threadMgr = ThreadManager::Instance();
     
@@ -113,7 +114,7 @@ nlohmann::json ThreadHandler::SuspendThread(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: thread_id");
     }
     
-    uint32_t threadId = params["thread_id"].get<uint32_t>();
+    uint32_t threadId = ValidateUInt32(params["thread_id"], "thread_id");
     
     auto& threadMgr = ThreadManager::Instance();
     bool success = threadMgr.SuspendThread(threadId);
@@ -137,7 +138,7 @@ nlohmann::json ThreadHandler::ResumeThread(const nlohmann::json& params) {
         throw InvalidParamsException("Missing required parameter: thread_id");
     }
     
-    uint32_t threadId = params["thread_id"].get<uint32_t>();
+    uint32_t threadId = ValidateUInt32(params["thread_id"], "thread_id");
     
     auto& threadMgr = ThreadManager::Instance();
     bool success = threadMgr.ResumeThread(threadId);

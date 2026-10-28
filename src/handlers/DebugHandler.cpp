@@ -1,3 +1,4 @@
+#include "../core/UInt32Validation.h"
 #include "DebugHandler.h"
 #include "../business/DebugController.h"
 #include "../core/ArchitectureRegisterNames.h"
@@ -217,44 +218,16 @@ json DebugHandler::AttachPid(const json& params) {
         };
     }
 
-    uint32_t pid = 0;
-    try {
-        if (params["pid"].is_number_unsigned()) {
-            pid = params["pid"].get<uint32_t>();
-        } else if (params["pid"].is_number_integer()) {
-            const int64_t value = params["pid"].get<int64_t>();
-            if (value <= 0) {
-                return {{"success", false}, {"error", "pid must be positive"}};
-            }
-            pid = static_cast<uint32_t>(value);
-        } else if (params["pid"].is_string()) {
-            const std::string text = params["pid"].get<std::string>();
-            const size_t start = text.find_first_not_of(" \t");
-            const size_t end = text.find_last_not_of(" \t");
-            if (start == std::string::npos) {
-                return {{"success", false}, {"error", "pid string is empty"}};
-            }
-            const std::string trimmed = text.substr(start, end - start + 1);
-            const unsigned long parsed = std::strtoul(trimmed.c_str(), nullptr, 10);
-            if (parsed == 0 || parsed > std::numeric_limits<uint32_t>::max()) {
-                return {{"success", false}, {"error", "invalid pid string"}};
-            }
-            pid = static_cast<uint32_t>(parsed);
-        } else {
-            return {{"success", false}, {"error", "pid must be number or string"}};
-        }
-    } catch (const std::exception& e) {
-        return {{"success", false}, {"error", e.what()}};
-    }
+    const uint32_t pid = ValidateUInt32(params["pid"], "pid");
 
     bool useAttachBreak = RequestValidator::GetBoolean(params, "attach_break", false);
     bool detachFirst = RequestValidator::GetBoolean(params, "detach_first", true);
-    const int64_t timeoutMs = RequestValidator::GetInteger(params, "timeout_ms", 15000);
+    const uint32_t timeoutMs = ValidateUInt32(params.value("timeout_ms", json(15000)), "timeout_ms");
 
     auto& controller = DebugController::Instance();
     const bool success = controller.AttachProcess(
         pid,
-        static_cast<uint32_t>(timeoutMs > 0 ? timeoutMs : 15000),
+        timeoutMs,
         useAttachBreak,
         detachFirst
     );
