@@ -111,6 +111,7 @@ add_executable(http_transport HttpTransportTests.cpp
     ${CMAKE_SOURCE_DIR}/src/core/Logger.cpp
     ${CMAKE_SOURCE_DIR}/src/core/MCPToolRegistry.cpp
     ${CMAKE_SOURCE_DIR}/src/core/MCPResourceRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/RequestValidator.cpp
     ${CMAKE_SOURCE_DIR}/src/core/MCPPromptRegistry.cpp)
 target_include_directories(http_transport PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_definitions(http_transport PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -172,3 +173,18 @@ target_compile_definitions(context_snapshot PRIVATE XDBG_SDK_AVAILABLE NOMINMAX 
 target_compile_options(context_snapshot PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 target_link_libraries(context_snapshot PRIVATE nlohmann_json::nlohmann_json)
 add_test(NAME context_snapshot COMMAND context_snapshot)
+
+add_executable(resource_templates ResourceTemplateTests.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/MCPResourceRegistry.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/RequestValidator.cpp)
+target_include_directories(resource_templates PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(resource_templates PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+target_link_libraries(resource_templates PRIVATE nlohmann_json::nlohmann_json)
+if(XDBG_ARCH STREQUAL "x64")
+    target_compile_definitions(resource_templates PRIVATE XDBG_ARCH_X64)
+    target_compile_definitions(http_transport PRIVATE XDBG_ARCH_X64)
+else()
+    target_compile_definitions(resource_templates PRIVATE XDBG_ARCH_X86)
+    target_compile_definitions(http_transport PRIVATE XDBG_ARCH_X86)
+endif()
+add_test(NAME resource_templates COMMAND resource_templates)
