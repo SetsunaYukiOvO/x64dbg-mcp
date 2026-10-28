@@ -6,6 +6,8 @@
 #include "../utils/StringUtils.h"
 #include "../core/X64DBGBridge.h"
 #include <algorithm>
+#include <chrono>
+#include "../core/ConfigManager.h"
 
 namespace MCP {
 
@@ -49,36 +51,21 @@ std::vector<uint8_t> MemoryManager::Read(uint64_t address, size_t size) {
     
     std::vector<uint8_t> buffer(size);
     
-    // 尝试读取完整大小
-    if (DbgMemRead(address, buffer.data(), size)) {
-        Logger::Trace("Read {} bytes from 0x{:X}", size, address);
-        return buffer;
-    }
-    
-    // 如果失败，尝试分块读取（处理跨页边界的情况）
-    Logger::Debug("Full read failed, attempting chunked read for {} bytes from 0x{:X}", size, address);
-    
-    size_t chunkSize = 4096; // 4KB chunks
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(ConfigManager::Instance().GetMemoryReadTimeout());
+    constexpr size_t chunkSize = 4096;
     size_t totalRead = 0;
-    
     for (size_t offset = 0; offset < size; offset += chunkSize) {
-        size_t currentChunkSize = std::min(chunkSize, size - offset);
-        uint64_t currentAddr = address + offset;
-        
-        // 检查当前块是否可读
-        if (!DbgMemIsValidReadPtr(currentAddr)) {
-            Logger::Warning("Memory not readable at chunk starting at 0x{:X}", currentAddr);
-            break;
-        }
-        
-        if (DbgMemRead(currentAddr, buffer.data() + offset, currentChunkSize)) {
-            totalRead += currentChunkSize;
-        } else {
-            Logger::Warning("Failed to read chunk at 0x{:X}, size {}", currentAddr, currentChunkSize);
-            break;
-        }
+        if (std::chrono::steady_clock::now() >= deadline)
+            throw OperationTimeoutException("Memory read timeout");
+        const size_t currentChunkSize = std::min(chunkSize, size - offset);
+        const uint64_t currentAddr = address + offset;
+        if (!DbgMemIsValidReadPtr(currentAddr) || !DbgMemRead(currentAddr, buffer.data() + offset, currentChunkSize)) break;
+        totalRead += currentChunkSize;
     }
-    
+    if (std::chrono::steady_clock::now() >= deadline)
+        throw OperationTimeoutException("Memory read timeout");
+
     if (totalRead == 0) {
         throw MCPException("Failed to read memory at: " +
                           StringUtils::FormatAddress(address));
@@ -223,6 +210,7 @@ std::vector<MemorySearchResult> MemoryManager::Search(
         }
         
         // 检查地址范围
+        if (region.size > UINT64_MAX - region.base) continue;
         uint64_t regionEnd = region.base + region.size;
         if (startAddress > 0 && regionEnd <= startAddress) continue;
         if (endAddress > 0 && region.base >= endAddress) continue;
@@ -246,14 +234,18 @@ std::vector<MemorySearchResult> MemoryManager::Search(
         
         // 分块读取并搜索
         const size_t chunkSize = 64 * 1024; // 64KB chunks
+        std::vector<uint8_t> carry;
         for (uint64_t addr = searchStart; addr < searchEnd && results.size() < maxResults; ) {
             size_t readSize = std::min<size_t>(chunkSize, searchEnd - addr);
             if (readSize == 0) break;
             
             try {
                 // 读取内存块
-                std::vector<uint8_t> buffer(readSize);
-                if (!DbgMemRead(addr, buffer.data(), readSize)) {
+                const size_t prefix = carry.size();
+                std::vector<uint8_t> buffer = carry;
+                buffer.resize(prefix + readSize);
+                if (!DbgMemRead(addr, buffer.data() + prefix, readSize)) {
+                    carry.clear();
                     // 读取失败，跳过此块
                     addr += readSize;
                     continue;
@@ -263,7 +255,7 @@ std::vector<MemorySearchResult> MemoryManager::Search(
                 for (size_t i = 0; i + patternBytes.size() <= buffer.size() && results.size() < maxResults; ++i) {
                     if (MatchPattern(buffer.data() + i, patternBytes, mask)) {
                         MemorySearchResult match;
-                        match.address = addr + i;
+                        match.address = addr - prefix + i;
                         match.data.assign(buffer.begin() + i, 
                                         buffer.begin() + i + patternBytes.size());
                         results.push_back(match);
@@ -271,9 +263,12 @@ std::vector<MemorySearchResult> MemoryManager::Search(
                     }
                 }
                 
+                const size_t overlap = std::min(patternBytes.size() - 1, buffer.size());
+                carry.assign(buffer.end() - overlap, buffer.end());
                 addr += readSize;
             } catch (...) {
-                // 读取失败，跳过此块
+                // Failed reads break contiguity; do not match across inaccessible data.
+                carry.clear();
                 addr += readSize;
             }
         }

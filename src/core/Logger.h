@@ -35,7 +35,8 @@ public:
      */
     static bool Initialize(const std::string& filePath, 
                           LogLevel level = LogLevel::Info,
-                          bool consoleOutput = true);
+                          bool consoleOutput = true,
+                          uint64_t maxFileSizeBytes = 10 * 1024 * 1024);
     
     /**
      * @brief 关闭日志系统
@@ -123,6 +124,9 @@ private:
     static void AppendFormattedValue(std::ostringstream& oss, char* value, const std::string& spec);
     
     static std::ofstream m_file;
+    static std::string m_filePath;
+    static uint64_t m_fileSize;
+    static uint64_t m_maxFileSize;
     static LogLevel m_level;
     static bool m_consoleOutput;
     static std::mutex m_mutex;

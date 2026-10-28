@@ -1,5 +1,6 @@
 #include "EventCallbackHandler.h"
 #include "../core/Logger.h"
+#include "../core/ConfigManager.h"
 #include "../communication/MCPHttpServer.h"
 #include "../utils/StringUtils.h"
 #include <chrono>
@@ -28,7 +29,7 @@ void EventCallbackHandler::Initialize() {
     std::lock_guard<std::mutex> lock(m_mutex);
     
     // 默认启用所有事�?
-    m_eventsEnabled = true;
+    m_eventsEnabled = ConfigManager::Instance().Get<bool>("features.enable_notifications", true);
     m_eventFilters[EventType::Breakpoint] = true;
     m_eventFilters[EventType::Exception] = true;
     m_eventFilters[EventType::ProcessCreated] = true;

@@ -1,17 +1,22 @@
 #include "ContextHandler.h"
 #include "../core/Logger.h"
-#include "../handlers/RegisterHandler.h"
-#include "../handlers/BreakpointHandler.h"
-#include "../handlers/StackHandler.h"
-#include "../handlers/ThreadHandler.h"
-#include "../handlers/ModuleHandler.h"
-#include "../handlers/DebugHandler.h"
+#include "../core/MethodDispatcher.h"
+#include "../core/Exceptions.h"
 #include <chrono>
 
 #ifdef XDBG_SDK_AVAILABLE
 #include "_plugins.h"
 #include "bridgemain.h"
 #endif
+
+namespace {
+json CaptureContext(const std::string& method, const json& params = json::object()) {
+    MCP::JSONRPCRequest request{"2.0", int64_t(1), method, params};
+    const auto response = MCP::MethodDispatcher::Instance().Dispatch(request);
+    if (response.error) throw MCP::MCPException(response.error->message, response.error->code);
+    return response.result;
+}
+}
 
 json ContextHandler::getSnapshot(const json& params) {
     try {
@@ -168,36 +173,21 @@ json ContextHandler::compareSnapshots(const json& params) {
 }
 
 json ContextHandler::captureRegisters() {
-    json params = json::object();
-    return MCP::RegisterHandler::List(params);
-}
-
-json ContextHandler::captureMemoryRegions() {
-    // Memory regions not implemented to avoid large responses
-    return json::array();
+    return CaptureContext("register.list");
 }
 
 json ContextHandler::captureBreakpoints() {
-    // Return empty array - breakpoint capture would require accessing private methods
-    // Clients can call breakpoint.list directly if needed
-    return json::array();
+    return CaptureContext("breakpoint.list").at("breakpoints");
 }
 
 json ContextHandler::captureThreads() {
-    // Return empty array - thread capture would require accessing private methods
-    // Clients can call thread.list directly if needed
-    return json::array();
+    return CaptureContext("thread.list").at("threads");
 }
 
 json ContextHandler::captureStack() {
-    // Return empty array - stack capture would require accessing private methods
-    // Clients can call stack.get_trace directly if needed
-    return json::array();
+    return CaptureContext("stack.get_trace", {{"max_depth", 64}}).at("frames");
 }
 
 json ContextHandler::captureModules() {
-    // Return empty array - module capture would require accessing private methods
-    // Clients can call module.list directly if needed
-    return json::array();
+    return CaptureContext("module.list").at("modules");
 }
-

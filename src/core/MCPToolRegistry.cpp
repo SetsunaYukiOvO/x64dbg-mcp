@@ -250,7 +250,7 @@ void MCPToolRegistry::RegisterDefaultTools() {
         "debug.attach_pid",
         {
             {"pid", "integer", "Target process ID (e.g. MAIN_NoCD.EXE after inject)", true, nullptr, nullptr},
-            {"timeout_ms", "integer", "Max wait for pause after attach (default 15000)", false, 15000, nullptr},
+            {"timeout_ms", "integer", "Max wait after attach (defaults to configured request timeout)", false, nullptr, nullptr},
             {"attach_break", "boolean", "After attach, wait until paused at system breakpoint (default false)", false, false, nullptr},
             {"detach_first", "boolean", "Detach/stop current session before attach if busy (default true)", false, true, nullptr}
         }
@@ -402,7 +402,8 @@ void MCPToolRegistry::RegisterDefaultTools() {
         "Enable a disabled breakpoint",
         "breakpoint.enable",
         {
-            {"address", "string", "Breakpoint address", true, nullptr, nullptr}
+            {"address", "string", "Breakpoint address", true, nullptr, nullptr},
+            {"type", "string", "Breakpoint type (default priority: software, hardware, memory)", false, nullptr, json::array({"software", "hardware", "memory"})}
         }
     });
     
@@ -411,7 +412,8 @@ void MCPToolRegistry::RegisterDefaultTools() {
         "Disable a breakpoint without removing it",
         "breakpoint.disable",
         {
-            {"address", "string", "Breakpoint address", true, nullptr, nullptr}
+            {"address", "string", "Breakpoint address", true, nullptr, nullptr},
+            {"type", "string", "Breakpoint type (default priority: software, hardware, memory)", false, nullptr, json::array({"software", "hardware", "memory"})}
         }
     });
     
@@ -541,7 +543,8 @@ void MCPToolRegistry::RegisterDefaultTools() {
         "Get detailed information about a breakpoint",
         "breakpoint.get",
         {
-            {"address", "string", "Breakpoint address", true, nullptr, nullptr}
+            {"address", "string", "Breakpoint address", true, nullptr, nullptr},
+            {"type", "string", "Breakpoint type (default priority: software, hardware, memory)", false, nullptr, json::array({"software", "hardware", "memory"})}
         }
     });
     
@@ -557,7 +560,8 @@ void MCPToolRegistry::RegisterDefaultTools() {
         "Toggle breakpoint state (enabled/disabled)",
         "breakpoint.toggle",
         {
-            {"address", "string", "Breakpoint address", true, nullptr, nullptr}
+            {"address", "string", "Breakpoint address", true, nullptr, nullptr},
+            {"type", "string", "Breakpoint type (default priority: software, hardware, memory)", false, nullptr, json::array({"software", "hardware", "memory"})}
         }
     });
     

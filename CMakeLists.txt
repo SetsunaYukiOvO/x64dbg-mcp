@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(x64dbg_mcp VERSION 1.0.11 LANGUAGES CXX RC)
+project(x64dbg_mcp VERSION 1.0.12 LANGUAGES CXX RC)
 
 # C++17 标准
 set(CMAKE_CXX_STANDARD 17)
@@ -92,9 +92,11 @@ set(BUSINESS_SOURCES
     src/business/BreakpointManager.cpp
     src/business/DisassemblyEngine.cpp
     src/business/SymbolResolver.cpp
+    src/business/SymbolLookup.cpp
     src/business/StackManager.cpp
     src/business/ThreadManager.cpp
     src/business/DumpManager.cpp
+    src/business/PEDump.cpp
 )
 
 set(HANDLER_SOURCES
@@ -208,6 +210,7 @@ set(XDBG_MAIN_LIB_DEFAULT "${_XDBG_DEFAULT_MAIN_LIB}" CACHE INTERNAL "Architectu
 target_link_libraries(x64dbg_mcp PRIVATE
     nlohmann_json::nlohmann_json
     ws2_32
+    bcrypt
     ${XDBG_BRIDGE_LIB}
     ${XDBG_MAIN_LIB}
 )

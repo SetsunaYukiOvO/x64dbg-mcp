@@ -1,5 +1,6 @@
 #include "ConfigManager.h"
 #include "Logger.h"
+#include "UInt32Validation.h"
 #include <fstream>
 #include <sstream>
 #include <filesystem>
@@ -14,11 +15,12 @@ ConfigManager& ConfigManager::Instance() {
 json ConfigManager::CreateDefaultConfig() const {
     json config;
     
-    config["version"] = "1.0.11";
+    config["version"] = "1.0.12";
     
     // Server configuration
     config["server"]["address"] = "127.0.0.1";
     config["server"]["port"] = 3000;
+    config["server"]["max_connections"] = 128;
     
     // Permissions
     config["permissions"]["allow_memory_write"] = false;
@@ -258,11 +260,24 @@ bool ConfigManager::IsLoggingEnabled() const {
 }
 
 uint32_t ConfigManager::GetRequestTimeout() const {
-    return static_cast<uint32_t>(Get<int>("timeout.request_timeout_ms", 30000));
+    return GetBoundedPositive("timeout.request_timeout_ms", 30000, 3600000);
 }
 
 uint32_t ConfigManager::GetStepTimeout() const {
-    return static_cast<uint32_t>(Get<int>("timeout.step_timeout_ms", 10000));
+    return GetBoundedPositive("timeout.step_timeout_ms", 10000, 3600000);
+}
+
+uint32_t ConfigManager::GetMemoryReadTimeout() const {
+    return GetBoundedPositive("timeout.memory_read_timeout_ms", 5000, 3600000);
+}
+uint32_t ConfigManager::GetHeartbeatInterval() const {
+    return GetBoundedPositive("features.heartbeat_interval_seconds", 30, 86400);
+}
+uint32_t ConfigManager::GetBoundedPositive(const std::string& key, uint32_t fallback, uint32_t maximum) const {
+    try {
+        const auto value = ValidateUInt32(Get<json>(key, fallback), key);
+        return value <= maximum ? value : fallback;
+    } catch (const InvalidParamsException&) { return fallback; }
 }
 
 std::string ConfigManager::GetConfigPath() const {

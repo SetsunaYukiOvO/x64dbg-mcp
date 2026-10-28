@@ -180,7 +180,7 @@ Edit `config.json` to customize settings:
 
 ```json
 {
-  "version": "1.0.11",
+  "version": "1.0.12",
   "server": {
     "address": "127.0.0.1",
     "port": 3000

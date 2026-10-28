@@ -144,28 +144,28 @@ public:
      * @param address 断点地址
      * @return 是否成功
      */
-    bool EnableBreakpoint(uint64_t address);
+    bool EnableBreakpoint(uint64_t address, std::optional<BreakpointType> type = std::nullopt);
     
     /**
      * @brief 禁用断点
      * @param address 断点地址
      * @return 是否成功
      */
-    bool DisableBreakpoint(uint64_t address);
+    bool DisableBreakpoint(uint64_t address, std::optional<BreakpointType> type = std::nullopt);
     
     /**
      * @brief 切换断点状态
      * @param address 断点地址
      * @return 是否成功
      */
-    bool ToggleBreakpoint(uint64_t address);
+    bool ToggleBreakpoint(uint64_t address, std::optional<BreakpointType> type = std::nullopt);
     
     /**
      * @brief 获取断点信息
      * @param address 断点地址
      * @return 断点信息
      */
-    std::optional<BreakpointInfo> GetBreakpoint(uint64_t address);
+    std::optional<BreakpointInfo> GetBreakpoint(uint64_t address, std::optional<BreakpointType> type = std::nullopt);
     
     /**
      * @brief 列出所有断点

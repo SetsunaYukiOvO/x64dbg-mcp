@@ -7,6 +7,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include "MCPHttpServer.h"
+#include "HttpHeaders.h"
 #include "../core/ConfigManager.h"
 #include "../core/Logger.h"
 #include "../core/MethodDispatcher.h"
@@ -15,6 +16,7 @@
 #include "../core/MCPResourceRegistry.h"
 #include "../core/MCPPromptRegistry.h"
 #include <ws2tcpip.h>
+#include <bcrypt.h>
 #include <sstream>
 #include <algorithm>
 #include <array>
@@ -62,26 +64,10 @@ std::string ToLowerCopy(std::string value) {
 }
 
 std::string GetHttpHeader(const std::string& request, const std::string& headerName) {
-    const size_t headerEnd = request.find("\r\n\r\n");
-    const std::string headers = (headerEnd != std::string::npos) ? request.substr(0, headerEnd) : request;
-
-    const std::string lowerHeaders = ToLowerCopy(headers);
-    const std::string search = ToLowerCopy(headerName) + ":";
-    const size_t pos = lowerHeaders.find(search);
-    if (pos == std::string::npos) {
-        return "";
-    }
-
-    size_t valueStart = pos + search.length();
-    while (valueStart < headers.size() && (headers[valueStart] == ' ' || headers[valueStart] == '\t')) {
-        valueStart++;
-    }
-    const size_t valueEnd = headers.find('\r', valueStart);
-    if (valueEnd == std::string::npos) {
-        return "";
-    }
-
-    return headers.substr(valueStart, valueEnd - valueStart);
+    HttpHeaders headers;
+    if (!ParseHttpHeaders(request, headers)) return "";
+    const auto it = headers.find(ToLowerCopy(headerName));
+    return it == headers.end() ? "" : it->second;
 }
 
 // Parse a requestId that was produced by json::dump(), falling back to null on failure.
@@ -115,44 +101,6 @@ bool ConstantTimeEquals(const std::string& left, const std::string& right) {
     return difference == 0;
 }
 
-bool ParseContentLength(const std::string& headers, size_t& outLength) {
-    std::istringstream stream(headers);
-    std::string line;
-
-    while (std::getline(stream, line)) {
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
-
-        const size_t colon = line.find(':');
-        if (colon == std::string::npos) {
-            continue;
-        }
-
-        std::string name = line.substr(0, colon);
-        TrimInPlace(name);
-        if (ToLowerCopy(name) != "content-length") {
-            continue;
-        }
-
-        std::string value = line.substr(colon + 1);
-        TrimInPlace(value);
-        if (value.empty()) {
-            return false;
-        }
-
-        try {
-            const size_t parsed = static_cast<size_t>(std::stoull(value));
-            outLength = parsed;
-            return true;
-        } catch (...) {
-            return false;
-        }
-    }
-
-    return false;
-}
-
 bool ReceiveHttpRequest(SOCKET socket, std::string& request, bool& payloadTooLarge) {
     request.clear();
     payloadTooLarge = false;
@@ -161,8 +109,20 @@ bool ReceiveHttpRequest(SOCKET socket, std::string& request, bool& payloadTooLar
     size_t headerEnd = std::string::npos;
     size_t contentLength = 0;
     bool lengthKnown = false;
+    const auto started = std::chrono::steady_clock::now();
+    const auto timeout = std::chrono::milliseconds(ConfigManager::Instance().GetRequestTimeout());
+    const auto requestDeadline = started + timeout;
+    const auto headerDeadline = started + std::min(timeout, std::chrono::milliseconds(10000));
 
     while (true) {
+        const auto deadline = headerEnd == std::string::npos ? headerDeadline : requestDeadline;
+        const auto remaining = std::chrono::duration_cast<std::chrono::microseconds>(deadline - std::chrono::steady_clock::now()).count();
+        if (remaining <= 0) return false;
+        fd_set readable;
+        FD_ZERO(&readable);
+        FD_SET(socket, &readable);
+        timeval wait{static_cast<long>(remaining / 1000000), static_cast<long>(remaining % 1000000)};
+        if (select(0, &readable, nullptr, nullptr, &wait) <= 0) return false;
         int bytesReceived = recv(socket, buffer.data(), static_cast<int>(buffer.size()), 0);
         if (bytesReceived <= 0) {
             break;
@@ -176,10 +136,13 @@ bool ReceiveHttpRequest(SOCKET socket, std::string& request, bool& payloadTooLar
 
         if (headerEnd == std::string::npos) {
             headerEnd = request.find("\r\n\r\n");
+            if ((headerEnd == std::string::npos && request.size() > 32768) ||
+                (headerEnd != std::string::npos && headerEnd > 32768)) return false;
             if (headerEnd != std::string::npos) {
                 const std::string headerPart = request.substr(0, headerEnd + 4);
-                if (!ParseContentLength(headerPart, contentLength)) {
-                    contentLength = 0;
+                HttpHeaders headers;
+                if (!ParseHttpHeaders(headerPart, headers) || !HttpContentLength(headers, contentLength)) {
+                    return false;
                 }
                 if (contentLength > kMaxHttpRequestSize) {
                     payloadTooLarge = true;
@@ -309,13 +272,9 @@ MCPHttpServer::~MCPHttpServer() {
 }
 
 bool MCPHttpServer::BroadcastNotification(const std::string& method, const nlohmann::json& params) {
-    MCPHttpServer* active = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(s_activeInstanceMutex);
-        active = s_activeInstance;
-    }
-
-    if (!active || !active->IsRunning()) {
+    std::lock_guard<std::mutex> lock(s_activeInstanceMutex);
+    MCPHttpServer* active = s_activeInstance;
+    if (!active || !active->IsRunning() || !ConfigManager::Instance().Get<bool>("features.enable_notifications", true)) {
         return false;
     }
 
@@ -350,6 +309,11 @@ bool MCPHttpServer::Start(const std::string& host, int port) {
     if (!IsLoopbackHost(host) && !config.IsHttpAuthenticationEnabled()) {
         Logger::Warning("SECURITY WARNING: HTTP server is listening on non-loopback address '{}' without authentication", host);
     }
+
+    const int configuredLimit = config.Get<int>("server.max_connections", 128);
+    m_maxConnections = static_cast<size_t>(std::clamp(configuredLimit, 1, 1024));
+    try { m_clientTasks.reserve(m_maxConnections); }
+    catch (const std::exception& ex) { Logger::Error("Cannot allocate HTTP task slots: {}", ex.what()); return false; }
 
     // 鍒濆鍖?WinSock
     WSADATA wsaData;
@@ -406,7 +370,12 @@ bool MCPHttpServer::Start(const std::string& host, int port) {
         s_activeInstance = this;
     }
 
-    m_serverThread = std::thread(&MCPHttpServer::ServerLoop, this);
+    try { m_serverThread = std::thread(&MCPHttpServer::ServerLoop, this); }
+    catch (const std::exception& ex) {
+        Logger::Error("Cannot start HTTP accept thread: {}", ex.what());
+        Stop();
+        return false;
+    }
 
     Logger::Info("MCP HTTP Server started on http://" + m_host + ":" + std::to_string(m_port));
     return true;
@@ -472,6 +441,7 @@ void MCPHttpServer::Stop() {
     {
         std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
         m_sseClientSockets.clear();
+        m_legacySessions.clear();
     }
     {
         std::lock_guard<std::mutex> lock(s_activeInstanceMutex);
@@ -497,20 +467,31 @@ void MCPHttpServer::ServerLoop() {
             break;
         }
 
+        CleanupFinishedClientTasks();
+        {
+            std::lock_guard<std::mutex> lock(m_clientTasksMutex);
+            if (m_clientTasks.size() >= m_maxConnections) {
+                closesocket(clientSocket);
+                continue;
+            }
+        }
+        DWORD sendTimeout = 5000;
+        setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO,
+                   reinterpret_cast<const char*>(&sendTimeout), sizeof(sendTimeout));
         {
             std::lock_guard<std::mutex> lock(m_activeClientSocketsMutex);
+            if (!m_running) { closesocket(clientSocket); break; }
             m_activeClientSockets.insert(clientSocket);
         }
 
+        try {
         auto task = std::async(std::launch::async, [this, clientSocket]() {
             try {
                 HandleClient(clientSocket);
             } catch (const std::exception& ex) {
                 Logger::Error("Unhandled exception in client handler: {}", ex.what());
-                closesocket(clientSocket);
             } catch (...) {
                 Logger::Error("Unhandled non-standard exception in client handler");
-                closesocket(clientSocket);
             }
 
             {
@@ -520,12 +501,23 @@ void MCPHttpServer::ServerLoop() {
             {
                 std::lock_guard<std::mutex> sseLock(m_sseClientSocketsMutex);
                 m_sseClientSockets.erase(clientSocket);
+                for (auto it = m_legacySessions.begin(); it != m_legacySessions.end();) {
+                    if (it->second.socket == clientSocket) it = m_legacySessions.erase(it);
+                    else ++it;
+                }
+                closesocket(clientSocket);
             }
         });
 
         {
             std::lock_guard<std::mutex> lock(m_clientTasksMutex);
             m_clientTasks.emplace_back(std::move(task));
+        }
+        } catch (const std::exception& ex) {
+            std::lock_guard<std::mutex> lock(m_activeClientSocketsMutex);
+            m_activeClientSockets.erase(clientSocket);
+            closesocket(clientSocket);
+            Logger::Error("Cannot create HTTP client task: {}", ex.what());
         }
     }
 }
@@ -564,12 +556,10 @@ void MCPHttpServer::HandleClient(SOCKET clientSocket) {
         } else if (!request.empty()) {
             SendHttpResponse(clientSocket, 400, "{\"error\":\"Bad Request\"}");
         }
-        closesocket(clientSocket);
         return;
     }
 
     HandleHttpRequest(clientSocket, request);
-    closesocket(clientSocket);
 }
 
 void MCPHttpServer::HandleHttpRequest(SOCKET clientSocket, const std::string& request) {
@@ -585,6 +575,19 @@ void MCPHttpServer::HandleHttpRequest(SOCKET clientSocket, const std::string& re
     const std::string origin = GetHttpHeader(request, "Origin");
     const std::string host = GetHttpHeader(request, "Host");
     const std::string authorization = GetHttpHeader(request, "Authorization");
+
+    std::string sessionId;
+    const size_t query = path.find('?');
+    if (query != std::string::npos) {
+        const std::string parameters = path.substr(query + 1);
+        path.resize(query);
+        if (parameters.rfind("sessionId=", 0) == 0 && parameters.find('&') == std::string::npos)
+            sessionId = parameters.substr(10);
+        else {
+            SendHttpResponse(clientSocket, 400, "{\"error\":\"Invalid session query\"}");
+            return;
+        }
+    }
 
     // Validate untrusted headers before reflecting Origin in any response.
     if (!ValidateCrossOriginAndHost(origin, host)) {
@@ -646,7 +649,7 @@ void MCPHttpServer::HandleHttpRequest(SOCKET clientSocket, const std::string& re
              (path == "/message" || path == "/" || path == "/messages" ||
               path == "/rpc" || path == "/rpc/")) {
         // 鏀寔澶氱 POST 璺緞锛?, /message, /messages
-        HandlePostMessage(clientSocket, body, origin);
+        HandlePostMessage(clientSocket, body, origin, sessionId);
     }
     else if (method == "GET" && path == "/") {
         // 鍋ュ悍妫€鏌?
@@ -686,22 +689,22 @@ void MCPHttpServer::HandleSSE(SOCKET clientSocket, const std::string& origin) {
         return;
     }
 
-    // MCP SSE transport handshake: immediately announce the POST endpoint.
+    std::array<unsigned char, 32> random{};
+    if (BCryptGenRandom(nullptr, random.data(), static_cast<ULONG>(random.size()), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0)
+        return;
+    std::string sessionId;
+    constexpr char hex[] = "0123456789abcdef";
+    for (const auto byte : random) { sessionId += hex[byte >> 4]; sessionId += hex[byte & 15]; }
     {
-        const std::string endpointEvent =
-            "event: endpoint\r\n"
-            "data: /message\r\n"
-            "\r\n";
-        std::lock_guard<std::mutex> lock(m_sseSendMutex);
-        if (!SendAll(clientSocket, endpointEvent)) {
-            Logger::Error("Failed to send SSE endpoint event");
-            return;
-        }
-    }
-
-    {
+        // Register before announcing the endpoint so an immediate POST can resolve it.
         std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
         m_sseClientSockets.insert(clientSocket);
+        m_legacySessions.emplace(sessionId, LegacySession{clientSocket, origin});
+        if (!SendSSEEvent(clientSocket, "endpoint", "/message?sessionId=" + sessionId)) {
+            m_legacySessions.erase(sessionId);
+            m_sseClientSockets.erase(clientSocket);
+            return;
+        }
     }
 
     Logger::Info("SSE connection established, endpoint event sent");
@@ -713,7 +716,7 @@ void MCPHttpServer::HandleSSE(SOCKET clientSocket, const std::string& origin) {
     // 璇诲彇瀹㈡埛绔彂閫佺殑娑堟伅锛堟湁浜?MCP 瀹㈡埛绔€氳繃 SSE 杩炴帴鍙戦€佽姹傦級
     char buffer[4096];
     std::string accumulated;
-    int heartbeatCounter = 0;
+    auto nextHeartbeat = std::chrono::steady_clock::now();
     
     while (m_running) {
         int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
@@ -797,9 +800,10 @@ void MCPHttpServer::HandleSSE(SOCKET clientSocket, const std::string& origin) {
         }
         
         // 姣?15 绉掑彂閫佷竴娆″績璺筹紙淇濇寔杩炴帴娲昏穬锛?
-        if (++heartbeatCounter >= 150) {  // 150 * 100ms = 15s
-            SendSSEEvent(clientSocket, "ping", "{}");
-            heartbeatCounter = 0;
+        auto& config = ConfigManager::Instance();
+        if (std::chrono::steady_clock::now() - nextHeartbeat >= std::chrono::seconds(config.GetHeartbeatInterval())) {
+            if (config.Get<bool>("features.enable_heartbeat", true) && !SendSSEEvent(clientSocket, "ping", "{}")) break;
+            nextHeartbeat = std::chrono::steady_clock::now();
         }
         
         // 鐭殏浼戠湢閬垮厤 CPU 鍗犵敤杩囬珮
@@ -811,61 +815,74 @@ void MCPHttpServer::HandleSSE(SOCKET clientSocket, const std::string& origin) {
     {
         std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
         m_sseClientSockets.erase(clientSocket);
+        m_legacySessions.erase(sessionId);
     }
 }
 
 void MCPHttpServer::HandlePostMessage(SOCKET clientSocket, const std::string& body,
-                                      const std::string& origin) {
-    Logger::Debug("POST body received: " + body);
-
-    try {
-        [[maybe_unused]] const auto parsed = json::parse(body);
-    } catch (const json::exception&) {
-        Logger::Error("Failed to parse JSON body");
-        SendHttpResponse(clientSocket, 400,
-                         "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Parse error\"}}",
-                         "application/json", origin);
-        return;
-    }
-
-    std::string method, requestId;
-    bool hasRequestId = false;
-    if (!ParseJsonRpcRequest(body, method, requestId, hasRequestId)) {
-        Logger::Error("Invalid JSON-RPC request");
-        SendHttpResponse(clientSocket, 400,
-                         "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Invalid Request\"}}",
-                         "application/json", origin);
-        return;
-    }
-
-    Logger::Info("MCP Method: " + method + ", ID: " + requestId);
-
-    // Check whether at least one SSE client is currently connected.
-    // MCP SSE transport delivers the response over SSE, not the POST reply.
-    bool hasSseClient = false;
-    {
+                                      const std::string& origin, const std::string& sessionId) {
+    // Validate a legacy session before dispatching a potentially mutating request.
+    if (!sessionId.empty()) {
         std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
-        hasSseClient = !m_sseClientSockets.empty();
+        const auto session = m_legacySessions.find(sessionId);
+        if (session == m_legacySessions.end() || session->second.origin != origin) {
+            SendHttpResponse(clientSocket, 404, "{\"error\":\"Unknown SSE session\"}", "application/json", origin);
+            return;
+        }
     }
 
-    std::string response = HandleMCPMethod(method, requestId, body);
-
-    // Notification (no id) or methods with no payload: 202 either way.
-    if (!hasRequestId || response.empty()) {
+    const std::string response = HandleMCPBody(body);
+    if (response.empty()) {
         SendHttpResponse(clientSocket, 202, "", "application/json", origin);
         return;
     }
 
-    if (hasSseClient) {
+    if (!sessionId.empty()) {
         // MCP SSE contract: ack the POST with 202, push response via SSE.
         SendHttpResponse(clientSocket, 202, "", "application/json", origin);
-        BroadcastSSEEvent("message", response);
+        std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
+        const auto session = m_legacySessions.find(sessionId);
+        if (session != m_legacySessions.end())
+            SendSSEEvent(session->second.socket, "message", response);
         Logger::Debug("Response dispatched via SSE: " + response);
     } else {
         // Fallback for plain HTTP clients (no SSE attached): reply inline.
         Logger::Debug("Inline reply (no SSE client): " + response);
         SendHttpResponse(clientSocket, 200, response, "application/json", origin);
     }
+}
+
+std::string MCPHttpServer::HandleMCPBody(const std::string& body) {
+    const auto error = [](int code, const char* message) {
+        return json{{"jsonrpc", "2.0"}, {"id", nullptr}, {"error", {{"code", code}, {"message", message}}}};
+    };
+    json input;
+    try { input = json::parse(body); }
+    catch (const json::exception&) { return error(-32700, "Parse error").dump(); }
+    const bool batch = input.is_array();
+    if (batch && (!ConfigManager::Instance().Get<bool>("features.enable_batch_requests", true) || input.empty() || input.size() > 128))
+        return error(-32600, "Batch requests disabled, empty, or too large").dump();
+    const json items = batch ? input : json::array({input});
+    json responses = json::array();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ConfigManager::Instance().GetRequestTimeout());
+    for (const auto& item : items) {
+        std::string method, id;
+        bool hasId = false;
+        const std::string raw = item.dump();
+        if (!ParseJsonRpcRequest(raw, method, id, hasId)) { responses.push_back(error(-32600, "Invalid Request")); continue; }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            if (hasId) {
+                auto timeout = error(-32005, "Request timeout"); timeout["id"] = SafeParseId(id); responses.push_back(timeout);
+            }
+            continue;
+        }
+        const auto response = HandleMCPMethod(method, id, raw);
+        if (hasId && std::chrono::steady_clock::now() >= deadline) {
+            auto timeout = error(-32005, "Request timeout"); timeout["id"] = SafeParseId(id); responses.push_back(timeout);
+        } else if (hasId && !response.empty()) responses.push_back(json::parse(response));
+    }
+    if (responses.empty()) return "";
+    return batch ? responses.dump() : responses.front().dump();
 }
 
 bool MCPHttpServer::ParseJsonRpcRequest(const std::string& rawJson,
@@ -920,7 +937,7 @@ std::string MCPHttpServer::HandleMCPMethod(const std::string& method, const std:
         return "{\"jsonrpc\":\"2.0\",\"id\":" + requestId +
                ",\"result\":{\"protocolVersion\":\"2024-11-05\","
                "\"capabilities\":{\"tools\":{},\"resources\":{},\"prompts\":{}},"
-               "\"serverInfo\":{\"name\":\"x64dbg-mcp\",\"version\":\"1.0.11\"}}}";
+               "\"serverInfo\":{\"name\":\"x64dbg-mcp\",\"version\":\"1.0.12\"}}}";
     }
     else if (method == "notifications/initialized") {
         // 杩欐槸瀹㈡埛绔彂鐨勯€氱煡锛屼笉闇€瑕佸搷搴?
@@ -1247,12 +1264,6 @@ bool MCPHttpServer::ParseHttpRequest(const std::string& request,
     
     path = request.substr(firstSpace + 1, secondSpace - firstSpace - 1);
 
-    // Normalize route path by dropping query parameters.
-    const size_t queryPos = path.find('?');
-    if (queryPos != std::string::npos) {
-        path = path.substr(0, queryPos);
-    }
-    
     // 鎻愬彇 body锛堝湪 \r\n\r\n 涔嬪悗锛?
     size_t bodyStart = request.find("\r\n\r\n");
     if (bodyStart != std::string::npos) {
@@ -1393,33 +1404,11 @@ bool MCPHttpServer::SendSSEEvent(SOCKET socket, const std::string& event, const 
 }
 
 bool MCPHttpServer::BroadcastSSEEvent(const std::string& event, const std::string& data) {
-    std::vector<SOCKET> targets;
-    {
-        std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
-        targets.assign(m_sseClientSockets.begin(), m_sseClientSockets.end());
-    }
-
-    if (targets.empty()) {
-        return false;
-    }
-
-    std::vector<SOCKET> disconnected;
+    // Hold the registry lock until sends complete; a closed socket must never be reused as a target.
+    std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
     bool sentAtLeastOne = false;
-    for (SOCKET clientSocket : targets) {
-        if (SendSSEEvent(clientSocket, event, data)) {
-            sentAtLeastOne = true;
-            continue;
-        }
-        disconnected.push_back(clientSocket);
-    }
-
-    if (!disconnected.empty()) {
-        std::lock_guard<std::mutex> lock(m_sseClientSocketsMutex);
-        for (SOCKET socket : disconnected) {
-            m_sseClientSockets.erase(socket);
-        }
-    }
-
+    for (SOCKET socket : m_sseClientSockets)
+        sentAtLeastOne = SendSSEEvent(socket, event, data) || sentAtLeastOne;
     return sentAtLeastOne;
 }
 
@@ -1495,35 +1484,8 @@ MCPHttpServer::MCPToolCallResult MCPHttpServer::CallMCPTool(const std::string& t
 // =============================================================================
 
 void MCPHttpServer::HandleStreamableHttpPost(SOCKET clientSocket, const std::string& body, const std::string& origin) {
-    Logger::Debug("[Streamable HTTP] POST body: " + body);
-
-    try {
-        [[maybe_unused]] const auto parsed = nlohmann::json::parse(body);
-    } catch (const nlohmann::json::exception&) {
-        Logger::Error("[Streamable HTTP] Failed to parse JSON body");
-        SendHttpResponse(clientSocket, 400,
-            "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32700,\"message\":\"Parse error\"}}",
-            "application/json", origin);
-        return;
-    }
-
-    std::string method;
-    std::string requestId;
-    bool hasRequestId = false;
-    if (!ParseJsonRpcRequest(body, method, requestId, hasRequestId)) {
-        Logger::Error("[Streamable HTTP] Invalid JSON-RPC request");
-        SendHttpResponse(clientSocket, 400,
-            "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"Invalid Request\"}}",
-            "application/json", origin);
-        return;
-    }
-
-    Logger::Info("[Streamable HTTP] Method: " + method + ", ID: " + requestId);
-
-    std::string response = HandleMCPMethod(method, requestId, body);
-
-    if (!hasRequestId || response.empty()) {
-        // Notification (no id) or fire-and-forget method: 202 Accepted, no body.
+    const std::string response = HandleMCPBody(body);
+    if (response.empty()) {
         SendHttpResponse(clientSocket, 202, "", "application/json", origin);
         return;
     }
@@ -1561,7 +1523,7 @@ void MCPHttpServer::HandleStreamableHttpStream(SOCKET clientSocket,
     ioctlsocket(clientSocket, FIONBIO, &mode);
 
     char buffer[256];
-    int heartbeatCounter = 0;
+    auto nextHeartbeat = std::chrono::steady_clock::now();
 
     while (m_running) {
         const int bytesReceived = recv(clientSocket, buffer, sizeof(buffer), 0);
@@ -1578,14 +1540,15 @@ void MCPHttpServer::HandleStreamableHttpStream(SOCKET clientSocket,
         }
 
         // SSE comment line as a no-op heartbeat (~15s).
-        if (++heartbeatCounter >= 150) {
+        if (std::chrono::steady_clock::now() - nextHeartbeat >= std::chrono::seconds(ConfigManager::Instance().GetHeartbeatInterval()) &&
+            ConfigManager::Instance().Get<bool>("features.enable_heartbeat", true)) {
             const std::string ping = ": ping\r\n\r\n";
             std::lock_guard<std::mutex> lock(m_sseSendMutex);
             if (!SendAll(clientSocket, ping)) {
                 Logger::Debug("[Streamable HTTP] Heartbeat send failed, closing");
                 break;
             }
-            heartbeatCounter = 0;
+            nextHeartbeat = std::chrono::steady_clock::now();
         }
 
         Sleep(100);

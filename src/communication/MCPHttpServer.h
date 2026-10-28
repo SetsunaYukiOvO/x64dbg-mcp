@@ -17,6 +17,7 @@
 #include <vector>
 #include <mutex>
 #include <unordered_set>
+#include <unordered_map>
 #include <winsock2.h>
 #include <nlohmann/json_fwd.hpp>
 
@@ -69,7 +70,7 @@ private:
 
     // 处理 POST 消息
     void HandlePostMessage(SOCKET clientSocket, const std::string& body,
-                           const std::string& origin);
+                           const std::string& origin, const std::string& sessionId = "");
 
     // Streamable HTTP transport (MCP 2025-03-26) — single endpoint /mcp.
     // POST returns the JSON-RPC response inline as application/json.
@@ -80,6 +81,7 @@ private:
     void HandleStreamableHttpStream(SOCKET clientSocket, const std::string& origin);
     
     // 处理 MCP 方法调用
+    std::string HandleMCPBody(const std::string& body);
     std::string HandleMCPMethod(const std::string& method, const std::string& requestId, const std::string& body);
     
     // 解析 JSON-RPC 请求
@@ -115,12 +117,15 @@ private:
     SOCKET m_listenSocket;
     std::atomic<bool> m_running;
     std::thread m_serverThread;
+    size_t m_maxConnections = 128;
     std::vector<std::future<void>> m_clientTasks;
     std::mutex m_clientTasksMutex;
     std::unordered_set<SOCKET> m_activeClientSockets;
     std::mutex m_activeClientSocketsMutex;
     std::unordered_set<SOCKET> m_sseClientSockets;
     std::mutex m_sseClientSocketsMutex;
+    struct LegacySession { SOCKET socket; std::string origin; };
+    std::unordered_map<std::string, LegacySession> m_legacySessions;
     std::mutex m_sseSendMutex;
     std::atomic<int> m_requestId;
 

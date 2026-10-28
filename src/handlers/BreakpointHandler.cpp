@@ -8,6 +8,16 @@
 #include <limits>
 
 namespace MCP {
+namespace {
+std::optional<BreakpointType> RequestedType(const nlohmann::json& params) {
+    if (!params.contains("type")) return std::nullopt;
+    if (params["type"] == "software") return BreakpointType::Software;
+    if (params["type"] == "hardware") return BreakpointType::Hardware;
+    if (params["type"] == "memory") return BreakpointType::Memory;
+    throw InvalidParamsException("Invalid breakpoint type");
+}
+}
+
 
 void BreakpointHandler::RegisterMethods() {
     auto& dispatcher = MethodDispatcher::Instance();
@@ -50,6 +60,15 @@ nlohmann::json BreakpointHandler::Set(const nlohmann::json& params) {
     }
     if (typeStr != "memory" && params.contains("mem_size")) {
         throw InvalidParamsException("Memory breakpoint size requires type=memory");
+    }
+
+    if (params.contains("condition")) {
+        if (!params["condition"].is_string()) {
+            throw InvalidParamsException("Breakpoint condition must be a string");
+        }
+        if (!PermissionChecker::Instance().IsScriptExecutionAllowed()) {
+            throw PermissionDeniedException("Conditional breakpoints require script execution permission");
+        }
     }
 
     auto& manager = BreakpointManager::Instance();
@@ -138,7 +157,9 @@ nlohmann::json BreakpointHandler::Set(const nlohmann::json& params) {
     // 濡傛灉鏈夋潯浠?璁剧疆鏉′欢
     if (params.contains("condition")) {
         std::string condition = params["condition"].get<std::string>();
-        manager.SetCondition(address, condition);
+        if (!manager.SetCondition(address, condition)) {
+            throw MCPException("Breakpoint created but condition could not be applied");
+        }
     }
     
     // 鏋勫缓鍝嶅簲
@@ -208,7 +229,7 @@ nlohmann::json BreakpointHandler::Enable(const nlohmann::json& params) {
     const uint64_t address = RequestValidator::GetAddress(params, "address");
     
     auto& manager = BreakpointManager::Instance();
-    bool success = manager.EnableBreakpoint(address);
+    bool success = manager.EnableBreakpoint(address, RequestedType(params));
     
     if (!success) {
         throw MCPException("Failed to enable breakpoint at: " + StringUtils::FormatAddress(address));
@@ -234,7 +255,7 @@ nlohmann::json BreakpointHandler::Disable(const nlohmann::json& params) {
     const uint64_t address = RequestValidator::GetAddress(params, "address");
     
     auto& manager = BreakpointManager::Instance();
-    bool success = manager.DisableBreakpoint(address);
+    bool success = manager.DisableBreakpoint(address, RequestedType(params));
     
     if (!success) {
         throw MCPException("Failed to disable breakpoint at: " + StringUtils::FormatAddress(address));
@@ -260,14 +281,14 @@ nlohmann::json BreakpointHandler::Toggle(const nlohmann::json& params) {
     const uint64_t address = RequestValidator::GetAddress(params, "address");
     
     auto& manager = BreakpointManager::Instance();
-    bool success = manager.ToggleBreakpoint(address);
+    bool success = manager.ToggleBreakpoint(address, RequestedType(params));
     
     if (!success) {
         throw MCPException("Failed to toggle breakpoint at: " + StringUtils::FormatAddress(address));
     }
     
     // 鑾峰彇褰撳墠鐘舵€?
-    auto bp = manager.GetBreakpoint(address);
+    auto bp = manager.GetBreakpoint(address, RequestedType(params));
     
     nlohmann::json result;
     result["success"] = true;
@@ -316,7 +337,7 @@ nlohmann::json BreakpointHandler::Get(const nlohmann::json& params) {
     const uint64_t address = RequestValidator::GetAddress(params, "address");
     
     auto& manager = BreakpointManager::Instance();
-    auto bp = manager.GetBreakpoint(address);
+    auto bp = manager.GetBreakpoint(address, RequestedType(params));
     
     if (!bp.has_value()) {
         throw InvalidAddressException("No breakpoint at address: " + StringUtils::FormatAddress(address));

@@ -29,7 +29,7 @@ cmake --build build_x64 --config Release -j
 For x86, use `-A Win32`, `-DVCPKG_TARGET_TRIPLET=x86-windows`, `-DXDBG_ARCH=x86`.
 
 ### Tests
-No test suite exists yet. CMake conditionally enables tests (`BUILD_TESTS=ON`) if a `tests/` directory is present.
+CMake builds regression tests with `BUILD_TESTS=ON`. Run `ctest --test-dir build_x64 -C Release --output-on-failure` and the equivalent command for `build_x86`. SDK-backed tests use explicit test replacements; HTTP transport tests use real Winsock sockets.
 
 ## Architecture overview
 

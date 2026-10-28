@@ -227,12 +227,12 @@ std::vector<RegisterInfo> RegisterManager::GetGeneralRegisters() {
     for (const auto& reg : allRegs) {
         if (reg.name != "rip" && reg.name != "eip" && 
             reg.name != "eflags" && reg.name != "rflags" &&
-            reg.name.find("cs") == std::string::npos &&
-            reg.name.find("ds") == std::string::npos &&
-            reg.name.find("es") == std::string::npos &&
-            reg.name.find("fs") == std::string::npos &&
-            reg.name.find("gs") == std::string::npos &&
-            reg.name.find("ss") == std::string::npos) {
+            reg.name != "cs" &&
+            reg.name != "ds" &&
+            reg.name != "es" &&
+            reg.name != "fs" &&
+            reg.name != "gs" &&
+            reg.name != "ss") {
             generalRegs.push_back(reg);
         }
     }

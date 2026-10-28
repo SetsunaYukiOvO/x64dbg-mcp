@@ -7,6 +7,9 @@
 #include "Logger.h"
 #include "MethodDispatcher.h"
 #include "JSONRPCParser.h"
+#include "RequestValidator.h"
+#include "UInt32Validation.h"
+#include "Exceptions.h"
 #include <nlohmann/json.hpp>
 #include <sstream>
 
@@ -132,7 +135,7 @@ void MCPResourceRegistry::RegisterDefaultResources() {
         "disassembly-at",
         "Disassembly Listing",
         "Disassemble instructions starting at address for count instructions",
-        "text/plain"
+        "application/json"
     });
     
     RegisterTemplate({
@@ -172,7 +175,7 @@ void MCPResourceRegistry::RegisterDefaultResources() {
         "function-disassembly",
         "Function Disassembly",
         "Complete disassembly of a function at given address",
-        "text/plain"
+        "application/json"
     });
     
     RegisterTemplate({
@@ -230,76 +233,72 @@ json MCPResourceRegistry::GenerateTemplatesListResponse() const {
 }
 
 MCPResourceContent MCPResourceRegistry::ReadResource(const std::string& uri) const {
-    MCPResourceContent content;
-    content.uri = uri;
-    content.mimeType = "application/json";
-    
-    auto& dispatcher = MethodDispatcher::Instance();
-    
-    try {
-        const auto dispatchResourceMethod = [&dispatcher](const std::string& method) -> std::string {
-            JSONRPCRequest request;
-            request.jsonrpc = "2.0";
-            request.method = method;
-            request.id = 1;
-            request.params = json::object();
-
-            JSONRPCResponse response = dispatcher.Dispatch(request);
-            if (response.error.has_value()) {
-                return json{
-                    {"error", {
-                        {"code", response.error->code},
-                        {"message", response.error->message},
-                        {"data", response.error->data}
-                    }}
-                }.dump(2);
+    std::string method;
+    json params = json::object();
+    if (uri == "debugger://state/current") method = "debug.get_state";
+    else if (uri == "debugger://registers/all") method = "register.list";
+    else if (uri == "debugger://modules/list") method = "module.list";
+    else if (uri == "debugger://threads/list") method = "thread.list";
+    else if (uri == "debugger://memory/map") method = "memory.enumerate";
+    else if (uri == "debugger://breakpoints/all") method = "breakpoint.list";
+    else if (uri == "debugger://stack/trace") method = "stack.get_trace";
+    else {
+        const size_t schemeEnd = uri.find("://");
+        const size_t slash = schemeEnd == std::string::npos ? std::string::npos : uri.find('/', schemeEnd + 3);
+        if (slash == std::string::npos || uri.find_first_of("?#") != std::string::npos || uri.find('/', slash + 1) != std::string::npos)
+            throw InvalidParamsException("Invalid resource URI");
+        const std::string scheme = uri.substr(0, schemeEnd);
+        const auto decode = [](const std::string& part) {
+            std::string value;
+            const auto hex = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                return -1;
+            };
+            for (size_t i = 0; i < part.size(); ++i) {
+                unsigned char c = part[i];
+                if (c == '%') {
+                    if (i + 2 >= part.size() || hex(part[i + 1]) < 0 || hex(part[i + 2]) < 0)
+                        throw InvalidParamsException("Invalid URI escape");
+                    c = static_cast<unsigned char>((hex(part[i + 1]) << 4) | hex(part[i + 2]));
+                    i += 2;
+                }
+                if (c < 32 || c == 127) throw InvalidParamsException("Invalid URI character");
+                value += static_cast<char>(c);
             }
-            return response.result.dump(2);
+            if (value.empty()) throw InvalidParamsException("Empty resource parameter");
+            return value;
         };
-
-        // Parse URI to determine what resource to read
-        if (uri == "debugger://state/current") {
-            content.text = dispatchResourceMethod("debug.get_state");
+        const std::string value = decode(uri.substr(schemeEnd + 3, slash - schemeEnd - 3));
+        const std::string operation = decode(uri.substr(slash + 1));
+        if (scheme == "memory" || scheme == "disassembly") {
+            params["address"] = RequestValidator::ValidateAddress(value);
+            const uint32_t count = ValidateUInt32(operation, "resource size/count");
+            if (count > (scheme == "memory" ? 1048576U : 10000U)) throw InvalidParamsException("Resource request too large");
+            params[scheme == "memory" ? "size" : "count"] = count;
+            method = scheme == "memory" ? "memory.read" : "disassembly.at";
+        } else if (scheme == "module") {
+            params["module"] = value;
+            if (operation == "info") method = "module.get";
+            else if (operation == "exports") method = "module.get_exports";
+            else if (operation == "imports") method = "module.get_imports";
+        } else if (scheme == "symbol" && operation == "resolve") {
+            params["symbol"] = value;
+            method = "symbol.resolve";
+        } else if (scheme == "function" && operation == "disassembly") {
+            params["address"] = RequestValidator::ValidateAddress(value);
+            method = "disassembly.function";
+        } else if (scheme == "breakpoint" && operation == "info") {
+            params["address"] = RequestValidator::ValidateAddress(value);
+            method = "breakpoint.get";
         }
-        else if (uri == "debugger://registers/all") {
-            content.text = dispatchResourceMethod("register.list");
-        }
-        else if (uri == "debugger://modules/list") {
-            content.text = dispatchResourceMethod("module.list");
-        }
-        else if (uri == "debugger://threads/list") {
-            content.text = dispatchResourceMethod("thread.list");
-        }
-        else if (uri == "debugger://memory/map") {
-            content.text = dispatchResourceMethod("memory.enumerate");
-        }
-        else if (uri == "debugger://breakpoints/all") {
-            content.text = dispatchResourceMethod("breakpoint.list");
-        }
-        else if (uri == "debugger://stack/trace") {
-            content.text = dispatchResourceMethod("stack.get_trace");
-        }
-        // Handle template URIs (with parameters)
-        else if (uri.find("memory://") == 0) {
-            // Parse: memory://{address}/{size}
-            // Example: memory://0x401000/256
-            content.mimeType = "application/json";
-            content.text = R"({"error": "Template URI - use resources/read with proper parameters"})";
-        }
-        else if (uri.find("disassembly://") == 0) {
-            // Parse: disassembly://{address}/{count}
-            content.mimeType = "text/plain";
-            content.text = "Template URI - use resources/read with proper parameters";
-        }
-        else {
-            content.text = R"({"error": "Unknown resource URI"})";
-        }
-        
-    } catch (const std::exception& e) {
-        content.text = json{{"error", e.what()}}.dump();
+        if (method.empty()) throw ResourceNotFoundException("Unknown resource URI: " + uri);
     }
-    
-    return content;
+    JSONRPCRequest request{"2.0", int64_t(1), method, params};
+    const auto response = MethodDispatcher::Instance().Dispatch(request);
+    if (response.error) throw MCPException(response.error->message, response.error->code);
+    return MCPResourceContent{uri, "application/json", response.result.dump(2), ""};
 }
 
 } // namespace MCP

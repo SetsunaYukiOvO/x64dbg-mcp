@@ -1,3 +1,4 @@
+#include "core/UInt32Validation.h"
 #include "core/Logger.h"
 #include "core/ConfigManager.h"
 #include "core/MethodDispatcher.h"
@@ -34,7 +35,7 @@
 #include <fstream>
 
 // 鎻掍欢鐗堟湰淇℃�?
-#define PLUGIN_VERSION "1.0.11"
+#define PLUGIN_VERSION "1.0.12"
 
 // 鍙�?CMake 瑕嗙洊锛歅LUGIN_DISPLAY_NAME, PLUGIN_DIR_NAME
 #ifndef PLUGIN_DISPLAY_NAME
@@ -100,6 +101,25 @@ static std::string GetActiveConfigPath() {
     return std::string(PLUGIN_DIR_NAME) + "\\config.json";
 }
 
+static void ApplyRuntimeConfiguration() {
+    auto& config = ConfigManager::Instance();
+    Logger::Shutdown();
+    if (config.IsLoggingEnabled()) {
+        const auto configuredLevel = config.GetLogLevel();
+        LogLevel level = LogLevel::Info;
+        if (configuredLevel == "trace") level = LogLevel::Trace;
+        else if (configuredLevel == "debug") level = LogLevel::Debug;
+        else if (configuredLevel == "warning") level = LogLevel::Warning;
+        else if (configuredLevel == "error") level = LogLevel::Error;
+        else if (configuredLevel == "critical") level = LogLevel::Critical;
+        auto path = std::filesystem::u8path(config.GetLogFile());
+        if (path.is_relative()) path = std::filesystem::u8path(GetActiveConfigPath()).parent_path() / path;
+        const auto limit = config.GetBoundedPositive("logging.max_file_size_mb", 10, 1024);
+        Logger::Initialize(path.u8string(), level, config.Get<bool>("logging.console_output", true), uint64_t(limit) * 1024 * 1024);
+    }
+    EventCallbackHandler::Instance().SetEventsEnabled(config.Get<bool>("features.enable_notifications", true));
+}
+
 static bool StartMcpHttpServer(bool reloadConfig) {
     if (!g_mcpHttpServer) {
         g_mcpHttpServer = std::make_unique<MCP::MCPHttpServer>();
@@ -117,6 +137,7 @@ static bool StartMcpHttpServer(bool reloadConfig) {
         _plugin_logprintf("[MCP] Failed to reload config from: %s\n", configPath.c_str());
     }
 
+    ApplyRuntimeConfiguration();
     MCP::PermissionChecker::Instance().Initialize();
 
     std::string address = config.GetServerAddress();
@@ -148,6 +169,10 @@ static void CB_InitDebug(CBTYPE cbType, void* callbackInfo) {
 /**
  * @brief x64dbg 鍥炶�? 鍋滄璋冭瘯
  */
+static void CB_PauseDebug(CBTYPE, void*) {
+    DebugController::Instance().NotifyPaused();
+}
+
 static void CB_StopDebug(CBTYPE cbType, void* callbackInfo) {
     Logger::Info("Debug session stopped");
 }
@@ -294,6 +319,7 @@ static void CB_MenuEntry(CBTYPE cbType, void* callbackInfo) {
                 _plugin_logputs("[MCP] Configuration updated");
                 // 閲嶆柊鍔犺浇閰嶇�?
                 config.Load(configPath);
+                ApplyRuntimeConfiguration();
                 MCP::PermissionChecker::Instance().Initialize();
                 UpdateAutoStartMenuCheck();
                 
@@ -431,28 +457,9 @@ static void RegisterAllMethods() {
 namespace MCP {
 
 static uint32_t ParsePidArg(const char* text) {
-    if (text == nullptr || *text == '\0') {
-        return 0;
-    }
-    // Skip leading '.' (x64dbg decimal prefix) or "0x" (hex prefix).
-    const char* p = text;
-    int base = 10;
-    if (*p == '.') {
-        ++p;
-    } else if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
-        p += 2;
-        base = 16;
-    }
-    if (*p == '\0') {
-        return 0;
-    }
-    char* end = nullptr;
-    errno = 0;
-    const unsigned long long value = std::strtoull(p, &end, base);
-    if (errno == ERANGE || end == p || *end != '\0' || value == 0 || value > UINT32_MAX) {
-        return 0;
-    }
-    return static_cast<uint32_t>(value);
+    if (!text) return 0;
+    try { return ValidateUInt32(std::string(text), "pid"); }
+    catch (const InvalidParamsException&) { return 0; }
 }
 
 static bool CmdMcpAttach(int argc, char** argv) {
@@ -495,6 +502,7 @@ static void RegisterPluginCommands() {
 static void RegisterCallbacks() {
     _plugin_registercallback(g_pluginHandle, CB_INITDEBUG, MCP::CB_InitDebug);
     _plugin_registercallback(g_pluginHandle, CB_STOPDEBUG, MCP::CB_StopDebug);
+    _plugin_registercallback(g_pluginHandle, CB_PAUSEDEBUG, MCP::CB_PauseDebug);
     _plugin_registercallback(g_pluginHandle, CB_BREAKPOINT, MCP::CB_Breakpoint);
     _plugin_registercallback(g_pluginHandle, CB_EXCEPTION, MCP::CB_Exception);
     _plugin_registercallback(g_pluginHandle, CB_CREATEPROCESS, MCP::CB_CreateProcess);
@@ -523,32 +531,6 @@ extern "C" __declspec(dllexport) bool pluginit(PLUG_INITSTRUCT* initStruct) {
     
     try {
         // 鑾峰彇褰撳墠妯″潡璺緞锛岀敤浜庢棩蹇楁枃浠?
-        char logPath[MAX_PATH] = {0};
-        HMODULE hModule = NULL;
-        if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                               (LPCSTR)&pluginit, &hModule)) {
-            GetModuleFileNameA(hModule, logPath, MAX_PATH);
-            // 鏇挎崲鏂囦欢鍚嶄负鏃ュ織鏂囦欢鍚?
-            char* lastSlash = strrchr(logPath, '\\');
-            if (lastSlash) {
-                std::string logName = std::string(PLUGIN_DIR_NAME) + ".log";
-                strcpy_s(lastSlash + 1, MAX_PATH - (lastSlash - logPath + 1), logName.c_str());
-            }
-        }
-        
-        // 濡傛灉鑾峰彇璺緞澶辫触锛屼娇鐢ㄩ粯璁よ矾寰?
-        if (logPath[0] == 0) {
-            std::string logName = std::string(PLUGIN_DIR_NAME) + ".log";
-            strcpy_s(logPath, logName.c_str());
-        }
-        
-        // 鍒濆鍖栨棩蹇楃郴缁?
-        MCP::Logger::Initialize(logPath, MCP::LogLevel::Info, true);
-        char initMsg[256];
-        sprintf_s(initMsg, "%s Plugin v%s initializing...", PLUGIN_DISPLAY_NAME, PLUGIN_VERSION);
-        MCP::Logger::Info(initMsg);
-        _plugin_logprintf("[MCP] Log file: %s\n", logPath);
-        
         _plugin_logprintf("[MCP] %s v%s\n", PLUGIN_DISPLAY_NAME, PLUGIN_VERSION);
         _plugin_logputs("[MCP] https://github.com/SetsunaYukiOvO/x64dbg-mcp");
         
@@ -571,65 +553,7 @@ extern "C" __declspec(dllexport) bool pluginit(PLUG_INITSTRUCT* initStruct) {
                 // 鍒涘缓榛樿閰嶇�?
                 std::ofstream configFile(configPath);
                 if (configFile.is_open()) {
-                    configFile << R"({
-  "version": "1.0.11",
-  "server": {
-    "address": "127.0.0.1",
-    "port": 3000
-  },
-  "permissions": {
-    "allow_memory_write": false,
-    "allow_register_write": false,
-    "allow_script_execution": false,
-    "allow_breakpoint_modification": true,
-    "allowed_methods": [
-      "debug.*",
-      "register.*",
-      "memory.*",
-      "breakpoint.*",
-      "disasm.*",
-      "disassembly.*",
-      "module.*",
-      "symbol.*",
-      "thread.*",
-      "stack.*",
-      "comment.*",
-      "context.*",
-      "dump.*",
-      "eval.*",
-      "xref.*",
-      "function.*",
-      "assembler.*",
-      "bookmark.*",
-      "patch.*"
-    ]
-  },
-  "security": {
-    "origin_allowlist": [],
-    "host_allowlist": [],
-    "auth_enabled": false,
-    "auth_token": ""
-  },
-    "logging": {
-        "enabled": true,
-        "level": "info",
-        "file": "plugin.log",
-        "max_file_size_mb": 10,
-        "console_output": true
-    },
-  "timeout": {
-    "request_timeout_ms": 30000,
-    "step_timeout_ms": 10000,
-    "memory_read_timeout_ms": 5000
-  },
-  "features": {
-    "enable_notifications": true,
-    "enable_heartbeat": true,
-    "heartbeat_interval_seconds": 30,
-    "enable_batch_requests": true,
-    "auto_start_mcp_on_plugin_load": false
-  }
-})";
+                    configFile << config.GetDefaultConfig().dump(2);
                     configFile.close();
                     MCP::Logger::Info("Default config.json created successfully");
                     _plugin_logputs("[MCP] Default config.json created");
@@ -642,15 +566,7 @@ extern "C" __declspec(dllexport) bool pluginit(PLUG_INITSTRUCT* initStruct) {
             config.Load(configPath);
             
             // 璁剧疆鏃ュ織绾у埆
-            std::string logLevel = config.Get<std::string>("logging.level", "info");
-            // 杞崲瀛楃涓插埌鏋氫�?
-            MCP::LogLevel level = MCP::LogLevel::Info;
-            if (logLevel == "trace") level = MCP::LogLevel::Trace;
-            else if (logLevel == "debug") level = MCP::LogLevel::Debug;
-            else if (logLevel == "warning") level = MCP::LogLevel::Warning;
-            else if (logLevel == "error") level = MCP::LogLevel::Error;
-            else if (logLevel == "critical") level = MCP::LogLevel::Critical;
-            MCP::Logger::SetLevel(level);
+            MCP::ApplyRuntimeConfiguration();
         } catch (const std::exception& e) {
             MCP::Logger::Warning("Failed to load config: {}, using defaults", e.what());
         }
