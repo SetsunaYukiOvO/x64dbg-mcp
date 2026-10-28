@@ -6,6 +6,8 @@
 #include "../core/X64DBGBridge.h"
 #include <limits>
 #include <sstream>
+#include <memory>
+#include <algorithm>
 
 #ifdef XDBG_SDK_AVAILABLE
 #include "_scriptapi_debug.h"
@@ -16,6 +18,31 @@ const DBGFUNCTIONS* SafeDbgFunctions() {
     const auto* f = DbgFunctions();
     if (!f) throw MCP::MCPException("x64dbg SDK functions not available");
     return f;
+}
+
+std::vector<BRIDGEBP> BreakpointSnapshot() {
+    BPMAP map{};
+    const int count = DbgGetBpList(bp_none, &map);
+    const std::unique_ptr<BRIDGEBP, decltype(&BridgeFree)> storage(map.bp, &BridgeFree);
+    if (count <= 0 || map.count <= 0 || !map.bp) return {};
+    return {map.bp, map.bp + std::min(count, map.count)};
+}
+
+int SnapshotTypes(uint64_t address) {
+    int types = bp_none;
+    for (const auto& bp : BreakpointSnapshot()) {
+        if (bp.addr == address && (bp.type == bp_normal || bp.type == bp_hardware || bp.type == bp_memory))
+            types |= bp.type;
+    }
+    return types;
+}
+
+BPXTYPE PreferredType(uint64_t address) {
+    const int types = SnapshotTypes(address);
+    if (types & bp_normal) return bp_normal;
+    if (types & bp_hardware) return bp_hardware;
+    if (types & bp_memory) return bp_memory;
+    return bp_none;
 }
 
 const char* HardwareConditionCommand(MCP::HardwareBreakpointCondition condition) {
@@ -81,7 +108,7 @@ bool HardwareBreakpointMatches(
 }
 
 bool MemoryBreakpointMatches(duint address, size_t size) {
-    return (DbgGetBpxTypeAt(address) & bp_memory) != 0 &&
+    return (SnapshotTypes(address) & bp_memory) != 0 &&
            SafeDbgFunctions()->MemBpSize &&
            SafeDbgFunctions()->MemBpSize(address) == static_cast<duint>(size);
 }
@@ -219,38 +246,7 @@ bool BreakpointManager::DeleteBreakpoint(uint64_t address, std::optional<Breakpo
     
     Logger::Debug("Deleting breakpoint at 0x{:X}", address);
     
-    // Check with both direct query and full list, because mixed-type breakpoints
-    // at the same address can be missed by DbgGetBpxTypeAt in some states.
-    int existingType = DbgGetBpxTypeAt(address);
-
-    int listedType = bp_none;
-    BPMAP bpMap;
-    bpMap.count = 0;
-    bpMap.bp = nullptr;
-
-    int listedCount = DbgGetBpList(bp_none, &bpMap);
-    if (listedCount > 0 && bpMap.bp != nullptr) {
-        for (int i = 0; i < listedCount; i++) {
-            const BRIDGEBP& bp = bpMap.bp[i];
-            if (bp.addr != address) {
-                continue;
-            }
-
-            if (bp.type == bp_normal) {
-                listedType |= bp_normal;
-            } else if (bp.type == bp_hardware) {
-                listedType |= bp_hardware;
-            } else if (bp.type == bp_memory) {
-                listedType |= bp_memory;
-            }
-        }
-    }
-
-    if (bpMap.bp != nullptr) {
-        BridgeFree(bpMap.bp);
-    }
-
-    existingType |= listedType;
+    const int existingType = SnapshotTypes(address);
 
     if (existingType == bp_none) {
         std::string msg = "No breakpoint exists at address: " +
@@ -263,25 +259,11 @@ bool BreakpointManager::DeleteBreakpoint(uint64_t address, std::optional<Breakpo
     std::string deletedType;
     
     if (!type.has_value()) {
-        // 删除所有类型的断点
-        bool softDeleted = false;
-        bool hardDeleted = false;
-        
-        if (existingType & bp_normal) {
-            softDeleted = Script::Debug::DeleteBreakpoint(address);
-            if (softDeleted) deletedType += "software ";
-        }
-        if (existingType & bp_hardware) {
-            hardDeleted = Script::Debug::DeleteHardwareBreakpoint(address);
-            if (hardDeleted) deletedType += "hardware ";
-        }
-        if (existingType & bp_memory) {
-            const bool memoryDeleted = DeleteMemoryBreakpointAt(address);
-            hardDeleted = hardDeleted || memoryDeleted;
-            if (memoryDeleted) deletedType += "memory ";
-        }
-        
-        success = softDeleted || hardDeleted;
+        success = true;
+        if (existingType & bp_normal) success = Script::Debug::DeleteBreakpoint(address) && success;
+        if (existingType & bp_hardware) success = Script::Debug::DeleteHardwareBreakpoint(address) && success;
+        if (existingType & bp_memory) success = DeleteMemoryBreakpointAt(address) && success;
+        deletedType = "all";
     } else {
         switch (type.value()) {
             case BreakpointType::Software:
@@ -378,93 +360,12 @@ std::optional<BreakpointInfo> BreakpointManager::GetBreakpoint(uint64_t address)
         throw DebuggerNotRunningException();
     }
     
-    int bpType = DbgGetBpxTypeAt(address);
-    if (bpType == bp_none) {
-        return std::nullopt;
-    }
-    
-    BreakpointInfo info{};
-    info.address = address;
-    info.hitCount = GetHitCount(address);
-    info.module = GetModuleName(address);
-    
-    // 确定断点类型
-    BPXTYPE type = bp_none;
-    if (bpType & bp_normal) {
-        info.type = BreakpointType::Software;
-        type = bp_normal;
-    } else if (bpType & bp_hardware) {
-        info.type = BreakpointType::Hardware;
-        info.condition = HardwareBreakpointCondition::Execute;
-        info.size = HardwareBreakpointSize::Byte1;
-        type = bp_hardware;
-    } else if (bpType & bp_memory) {
-        info.type = BreakpointType::Memory;
-        type = bp_memory;
-        if (SafeDbgFunctions()->MemBpSize) {
-            info.memorySize = static_cast<size_t>(SafeDbgFunctions()->MemBpSize(address));
-        }
-    }
-    
-    // 从 x64dbg 获取断点启用状态
-    BP_REF bpRef;
-    memset(&bpRef, 0, sizeof(bpRef));
-    
-    if (SafeDbgFunctions()->BpRefVa(&bpRef, type, address)) {
-        duint enabled = 0;
-        if (SafeDbgFunctions()->BpGetFieldNumber(&bpRef, bpf_enabled, &enabled)) {
-            info.enabled = (enabled != 0);
-        } else {
-            info.enabled = true; // 默认为启用
-        }
-        
-        if (info.type == BreakpointType::Hardware) {
-            duint typeEx = 0;
-            if (SafeDbgFunctions()->BpGetFieldNumber(&bpRef, bpf_typeex, &typeEx)) {
-                switch (static_cast<BPHWTYPE>(typeEx)) {
-                    case hw_access:
-                        info.condition = HardwareBreakpointCondition::ReadWrite;
-                        break;
-                    case hw_write:
-                        info.condition = HardwareBreakpointCondition::Write;
-                        break;
-                    case hw_execute:
-                        info.condition = HardwareBreakpointCondition::Execute;
-                        break;
-                }
-            }
-
-            duint hwSize = 0;
-            if (SafeDbgFunctions()->BpGetFieldNumber(&bpRef, bpf_hwsize, &hwSize)) {
-                switch (static_cast<BPHWSIZE>(hwSize)) {
-                    case hw_byte: info.size = HardwareBreakpointSize::Byte1; break;
-                    case hw_word: info.size = HardwareBreakpointSize::Byte2; break;
-                    case hw_dword: info.size = HardwareBreakpointSize::Byte4; break;
-                    case hw_qword: info.size = HardwareBreakpointSize::Byte8; break;
-                }
-            }
-        }
-
-        // 获取日志断点信息
-        std::string logText;
-        if (SafeDbgFunctions()->BpGetFieldText(&bpRef, bpf_logtext, 
-            [](const char* str, void* userdata) {
-                if (str) {
-                    *(std::string*)userdata = str;
-                }
-            }, &logText)) {
-            info.isLogBreakpoint = !logText.empty();
-            info.logMessage = logText;
-        } else {
-            info.isLogBreakpoint = false;
-        }
-    } else {
-        // 如果无法获取引用，默认为启用
-        info.enabled = true;
-        info.isLogBreakpoint = false;
-    }
-    
-    return info;
+    const auto breakpoints = ListBreakpoints();
+    // Deterministic priority for same-address queries: software, hardware, memory.
+    for (const auto type : {BreakpointType::Software, BreakpointType::Hardware, BreakpointType::Memory})
+        for (const auto& bp : breakpoints)
+            if (bp.address == address && bp.type == type) return bp;
+    return std::nullopt;
 }
 
 std::vector<BreakpointInfo> BreakpointManager::ListBreakpoints(std::optional<BreakpointType> typeFilter) {
@@ -474,36 +375,8 @@ std::vector<BreakpointInfo> BreakpointManager::ListBreakpoints(std::optional<Bre
     
     std::vector<BreakpointInfo> breakpoints;
     
-    // 使用 x64dbg API 获取断点列表
-    BPMAP bpMap;
-    bpMap.count = 0;
-    bpMap.bp = nullptr;
-    
-    // 获取所有类型的断点
-    int count = DbgGetBpList(bp_none, &bpMap);
-    
-    if (count > 0 && bpMap.bp != nullptr) {
-        for (int i = 0; i < count; i++) {
-            const BRIDGEBP& bp = bpMap.bp[i];
-
-            int expectedTypeBit = bp_none;
-            if (bp.type == bp_normal) {
-                expectedTypeBit = bp_normal;
-            } else if (bp.type == bp_hardware) {
-                expectedTypeBit = bp_hardware;
-            } else if (bp.type == bp_memory) {
-                expectedTypeBit = bp_memory;
-            } else {
-                continue;
-            }
-
-            // Filter out stale entries returned by DbgGetBpList.
-            // Keep only entries that still exist at address and type.
-            int currentType = DbgGetBpxTypeAt(bp.addr);
-            if (currentType == bp_none || !(currentType & expectedTypeBit)) {
-                continue;
-            }
-
+    for (const BRIDGEBP& bp : BreakpointSnapshot()) {
+            if (bp.type != bp_normal && bp.type != bp_hardware && bp.type != bp_memory) continue;
             // 转换为 BreakpointInfo
             BreakpointInfo info{};
             info.address = bp.addr;
@@ -567,14 +440,8 @@ std::vector<BreakpointInfo> BreakpointManager::ListBreakpoints(std::optional<Bre
             info.logMessage = bp.logText;
             
             breakpoints.push_back(info);
-        }
-        
-        // 释放内存
-        if (bpMap.bp) {
-            BridgeFree(bpMap.bp);
-        }
     }
-    
+
     Logger::Debug("Listed {} breakpoints", breakpoints.size());
     return breakpoints;
 }
@@ -630,15 +497,7 @@ bool BreakpointManager::SetCondition(uint64_t address, const std::string& condit
     
     // 根据地址创建断点引用（使用虚拟地址）
     // 需要确定断点类型
-    int bpType = DbgGetBpxTypeAt(address);
-    BPXTYPE type = bp_none;
-    if (bpType & bp_normal) {
-        type = bp_normal;
-    } else if (bpType & bp_hardware) {
-        type = bp_hardware;
-    } else if (bpType & bp_memory) {
-        type = bp_memory;
-    }
+    const BPXTYPE type = PreferredType(address);
     
     if (!SafeDbgFunctions()->BpRefVa(&bpRef, type, address)) {
         Logger::Error("Failed to get breakpoint reference at 0x{:X}", address);
@@ -670,15 +529,7 @@ bool BreakpointManager::SetLogBreakpoint(uint64_t address, const std::string& me
     BP_REF bpRef;
     memset(&bpRef, 0, sizeof(bpRef));
     
-    int bpType = DbgGetBpxTypeAt(address);
-    BPXTYPE type = bp_none;
-    if (bpType & bp_normal) {
-        type = bp_normal;
-    } else if (bpType & bp_hardware) {
-        type = bp_hardware;
-    } else if (bpType & bp_memory) {
-        type = bp_memory;
-    }
+    const BPXTYPE type = PreferredType(address);
     
     if (!SafeDbgFunctions()->BpRefVa(&bpRef, type, address)) {
         Logger::Error("Failed to get breakpoint reference at 0x{:X}", address);
@@ -710,15 +561,7 @@ bool BreakpointManager::RenameBreakpoint(uint64_t address, const std::string& na
     BP_REF bpRef;
     memset(&bpRef, 0, sizeof(bpRef));
     
-    int bpType = DbgGetBpxTypeAt(address);
-    BPXTYPE type = bp_none;
-    if (bpType & bp_normal) {
-        type = bp_normal;
-    } else if (bpType & bp_hardware) {
-        type = bp_hardware;
-    } else if (bpType & bp_memory) {
-        type = bp_memory;
-    }
+    const BPXTYPE type = PreferredType(address);
     
     if (!SafeDbgFunctions()->BpRefVa(&bpRef, type, address)) {
         Logger::Error("Failed to get breakpoint reference at 0x{:X}", address);
@@ -740,7 +583,7 @@ bool BreakpointManager::HasBreakpoint(uint64_t address) {
         return false;
     }
     
-    return DbgGetBpxTypeAt(address) != bp_none;
+    return PreferredType(address) != bp_none;
 }
 
 uint32_t BreakpointManager::GetHitCount(uint64_t address) {
@@ -748,37 +591,8 @@ uint32_t BreakpointManager::GetHitCount(uint64_t address) {
         return 0;
     }
     
-    // 检查断点是否存在
-    int bpType = DbgGetBpxTypeAt(address);
-    if (bpType == bp_none) {
-        return 0;
-    }
-    
-    // 使用 DbgFunctions API 获取命中次数
-    BP_REF bpRef;
-    memset(&bpRef, 0, sizeof(bpRef));
-    
-    BPXTYPE type = bp_none;
-    if (bpType & bp_normal) {
-        type = bp_normal;
-    } else if (bpType & bp_hardware) {
-        type = bp_hardware;
-    } else if (bpType & bp_memory) {
-        type = bp_memory;
-    }
-    
-    if (!SafeDbgFunctions()->BpRefVa(&bpRef, type, address)) {
-        Logger::Warning("Failed to get breakpoint reference at 0x{:X}", address);
-        return 0;
-    }
-    
-    // 获取命中次数字段
-    duint hitCount = 0;
-    if (SafeDbgFunctions()->BpGetFieldNumber(&bpRef, bpf_hitcount, &hitCount)) {
-        return static_cast<uint32_t>(hitCount);
-    }
-    
-    return 0;
+    const auto bp = GetBreakpoint(address);
+    return bp ? bp->hitCount : 0;
 }
 
 bool BreakpointManager::ResetHitCount(uint64_t address) {
@@ -796,15 +610,7 @@ bool BreakpointManager::ResetHitCount(uint64_t address) {
     BP_REF bpRef;
     memset(&bpRef, 0, sizeof(bpRef));
     
-    int bpType = DbgGetBpxTypeAt(address);
-    BPXTYPE type = bp_none;
-    if (bpType & bp_normal) {
-        type = bp_normal;
-    } else if (bpType & bp_hardware) {
-        type = bp_hardware;
-    } else if (bpType & bp_memory) {
-        type = bp_memory;
-    }
+    const BPXTYPE type = PreferredType(address);
     
     if (!SafeDbgFunctions()->BpRefVa(&bpRef, type, address)) {
         Logger::Error("Failed to get breakpoint reference at 0x{:X}", address);
